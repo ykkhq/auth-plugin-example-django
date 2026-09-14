@@ -1,3 +1,49 @@
+# Djangoに対して認証をするKong pluginのデモ
+
+### 流れ
+Client(curl) ---> Kong API gateway (dp) ---> Django
+
+### 利用Kong Plugin
+- Key auth
+- Datakit
+- pre function (サンプル、利用しない)
+
+Key Authでapikey認証を行い、Datakitでハードコードされたusername+passwordをbase64でエンコードしてDjangoに対してBasic認証をする。
+
+.
+├── db.sqlite3
+├── docker-compose.yml
+├── Dockerfile
+├── inventory
+├── inventory_management
+├── kong
+│   ├── kong.yaml  <-- deckコマンドでdumpした設定
+│   ├── pre-function.kong.yaml
+│   └── README-kong.md
+├── manage.py
+├── README.md
+├── requirements.txt
+├── start_dp.sh
+└── staticfiles
+
+###  利用方法
+
+1. Kong Konnect でControl PLaneを作る。
+2. Dataplaneをdockerで展開する。
+3. Git cloneでこのレポジトリをclone。
+4. docker compose --build up -d でDjangoを起動。
+5. kong/kong.yaml のdeckファイルをdeckコマンドでsyncする。（情報の修正が必要）
+6. 動作を確認する。
+
+### 確認方法
+
+Kong data planeと同じホスト内でcurlを実行する場合のコマンド。
+
+```
+curl -L -k https://127.0.0.1:8443/inventory/ -H "apikey:test" 
+```
+
+
 # Inventory Management API (Django + DRF)
 
 A small inventory management REST API, meant to sit behind Kong Konnect
