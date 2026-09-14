@@ -12,18 +12,31 @@ Key Authでapikey認証を行い、Datakitでハードコードされたusername
 
 .
 ├── db.sqlite3
+
 ├── docker-compose.yml
+
 ├── Dockerfile
+
 ├── inventory
+
 ├── inventory_management
+
 ├── kong
+
 │   ├── kong.yaml  <-- deckコマンドでdumpした設定
+
 │   ├── pre-function.kong.yaml
+
 │   └── README-kong.md
+
 ├── manage.py
+
 ├── README.md
+
 ├── requirements.txt
+
 ├── start_dp.sh
+
 └── staticfiles
 
 ###  利用方法
