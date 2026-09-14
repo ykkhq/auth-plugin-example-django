@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Inventory{% endblock %}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f5f6f8; color: #1c1e21; }
+    header { background: #1c2733; color: #fff; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+    header a { color: #fff; }
+    header .brand { font-weight: 600; font-size: 1.1rem; }
+    header nav { display: flex; align-items: center; gap: 1rem; }
+    main { max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
+    table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+    th, td { text-align: left; padding: 0.6rem 0.8rem; border-bottom: 1px solid #e5e7eb; }
+    th { background: #eef1f5; }
+    .btn { display: inline-block; padding: 0.4rem 0.9rem; border-radius: 4px; text-decoration: none; font-size: 0.9rem; border: none; cursor: pointer; }
+    .btn-primary { background: #2563eb; color: #fff; }
+    .btn-danger { background: #dc2626; color: #fff; }
+    .btn-secondary { background: #e5e7eb; color: #111; }
+    form.inline { display: inline; margin: 0; }
+    .actions { display: flex; gap: 0.4rem; }
+    .card { background: #fff; padding: 1.5rem 2rem; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.08); max-width: 420px; margin: 3rem auto; }
+    .card input, .card textarea { width: 100%; padding: 0.5rem; margin: 0.3rem 0 1rem; box-sizing: border-box; border: 1px solid #d1d5db; border-radius: 4px; font-size: 1rem; }
+    .card label { font-weight: 600; font-size: 0.9rem; }
+    .messages { list-style: none; padding: 0; }
+    .messages li, ul.errorlist { background: #fee2e2; color: #991b1b; padding: 0.5rem 0.8rem; border-radius: 4px; margin: 0 0 0.5rem 0; list-style: none; }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="brand">📦 Inventory</span>
+    <nav>
+      {% if user.is_authenticated %}
+        <span>{{ user.username }}</span>
+        <form class="inline" method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn btn-secondary" type="submit">Log out</button></form>
+      {% else %}
+        <a href="{% url 'login' %}">Log in</a>
+      {% endif %}
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

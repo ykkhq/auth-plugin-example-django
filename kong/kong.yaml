@@ -1,0 +1,139 @@
+_format_version: "3.0"
+_konnect:
+  control_plane_name: kumagai-local
+consumers:
+- basicauth_credentials:
+  - password: 3f788a76c4480000de899fae3abec529991b28aa
+    username: user1
+  keyauth_credentials:
+  - key: awsome user1
+  - key: test
+  username: user1
+plugins:
+- config:
+    nodes:
+    - name: creds
+      output: null
+      outputs: null
+      type: static
+      values:
+        password: awesome user1
+        username: user1
+    - input: null
+      inputs:
+        password: creds.password
+        username: creds.username
+      jq: '{ Authorization: ("Basic " + ("\(.username):\(.password)" | @base64)) }'
+      name: Create_Basic_Auth
+      output: service_request.headers
+      type: jq
+  enabled: true
+  instance_name: Creat_basic_auth
+  name: datakit
+  protocols:
+  - http
+  - https
+  route: django-route-items
+  service: django-api-items
+- enabled: true
+  instance_name: keyauth-to-basic
+  name: key-auth
+  protocols:
+  - http
+  - https
+  - ws
+  - wss
+  route: django-route-items
+  service: django-api-items
+- config:
+    access:
+    - |-
+      local http = require "resty.http"
+                        local cjson = require "cjson.safe"
+
+                        -- Sample-only: hardcoded upstream login URL + shared
+                        -- service-account credentials. In a real deployment,
+                        -- source the password from a Kong Vault reference, e.g.
+                        -- config templated as "{vault://env/DJANGO_SERVICE_PASSWORD}",
+                        -- and make the login URL an env/vault value too.
+                        local django_login_url = "http://192.168.106.2:3333/api/auth/login/"
+                        local service_username = "kong_service"
+                        local service_password = "kong-service-demo-pw"
+
+                        local httpc = http.new()
+                        local res, err = httpc:request_uri(django_login_url, {
+                          method = "POST",
+                          body = cjson.encode({
+                            username = service_username,
+                            password = service_password,
+                          }),
+                          headers = {
+                            ["Content-Type"] = "application/json",
+                          },
+                        })
+
+                        if not res then
+                          kong.log.err("django session login request failed: ", err)
+                          return kong.response.exit(502, { message = "upstream session login failed" })
+                        end
+
+                        if res.status ~= 200 then
+                          kong.log.err("django rejected service-account login, status=", res.status)
+                          return kong.response.exit(502, { message = "upstream session login rejected" })
+                        end
+
+                        -- Django's login() always calls rotate_token() (a CSRF
+                        -- fixation defense), so this response carries TWO
+                        -- Set-Cookie headers -- csrftoken first, then sessionid.
+                        -- Scan all of them for the one we actually want instead
+                        -- of assuming the first entry is it.
+                        local set_cookie = res.headers["Set-Cookie"]
+                        local session_id
+
+                        if type(set_cookie) == "table" then
+                          for _, cookie in ipairs(set_cookie) do
+                            session_id = cookie:match("sessionid=([^;]+)")
+                            if session_id then
+                              break
+                            end
+                          end
+                        elseif set_cookie then
+                          session_id = set_cookie:match("sessionid=([^;]+)")
+                        end
+
+                        if not session_id then
+                          kong.log.err("no sessionid cookie in django login response")
+                          return kong.response.exit(502, { message = "upstream did not return a session" })
+                        end
+
+                        -- NOTE (sample simplification): this logs into Django on
+                        -- every proxied request. A production version should
+                        -- cache the sessionid per worker (e.g. kong.cache or an
+                        -- ngx.shared.DICT) keyed on nothing-request-specific,
+                        -- with a TTL kept below Django's SESSION_COOKIE_AGE, and
+                        -- only re-login on a cache miss or after Django returns
+                        -- 401/403 for the cached session.
+                        kong.service.request.set_header("Cookie", "sessionid=" .. session_id)
+    header_filter:
+    - kong.response.clear_header("Set-Cookie")
+  enabled: false
+  instance_name: kong-to-django-idpw-login
+  name: pre-function
+  protocols:
+  - http
+  - https
+  route: django-route-items
+  service: django-api-items
+services:
+- host: 192.168.106.2
+  name: django-api-items
+  path: /api/items
+  port: 3333
+  routes:
+  - methods:
+    - GET
+    name: django-route-items
+    paths:
+    - /inventory
+    protocols:
+    - https

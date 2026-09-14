@@ -1,0 +1,165 @@
+###############################################################################
+# Sample decK state file: Kong Konnect gateway in front of the Django
+# inventory API.
+#
+# Auth model:
+#   Browser <-> Kong  : OIDC login (openid-connect plugin, real SSO/IdP)
+#   Kong    <-> Django: a single shared service-account session login
+#                        (pre-function plugin, bridges the two)
+#
+# End users only ever see the OIDC login screen. Kong is the only thing
+# that ever knows the Django service-account password, and Django never
+# needs to know the IdP exists.
+#
+# Run locally (self-hosted Kong, DB-less, alongside Django):
+#   docker compose up --build
+# Sync to Konnect instead:
+#   deck gateway sync -s kong.yaml --konnect-control-plane-name <cp-name>
+# or, against your own already-running Kong Admin API:
+#   deck gateway sync -s kong.yaml
+###############################################################################
+_format_version: "3.0"
+
+services:
+  - name: inventory-service
+    # Kong runs in its own separate container/compose project here, not on
+    # this repo's docker-compose network, so it can't resolve "django" by
+    # service name. host.docker.internal lets Kong's container reach the
+    # django service's host-published port (3333:3333 in docker-compose.yml)
+    # instead. Works out of the box on Docker Desktop (macOS/Windows); on
+    # Linux Docker Engine, add to Kong's own compose file:
+    #   extra_hosts: ["host.docker.internal:host-gateway"]
+    # If Kong and Django instead share one compose network, use
+    # http://django:3333 (the compose service name) here.
+    url: http://host.docker.internal:3333
+    routes:
+      - name: inventory-route
+        paths:
+          - /inventory
+        strip_path: true
+        plugins:
+          # 1) Gate the route behind OIDC login. All values below are
+          #    placeholders -- replace them with your real IdP's details
+          #    (Okta / Auth0 / Keycloak / Azure AD / etc).
+          - name: openid-connect
+            config:
+              # Discovery URL of the IdP, e.g.
+              # https://YOUR-IDP-DOMAIN/.well-known/openid-configuration
+              issuer: https://your-idp.example.com/.well-known/openid-configuration
+              # Client credentials from the IdP application registration.
+              client_id:
+                - REPLACE_WITH_OIDC_CLIENT_ID
+              client_secret:
+                - REPLACE_WITH_OIDC_CLIENT_SECRET
+              scopes:
+                - openid
+              # Accept an OIDC login (authorization_code) and, once
+              # established, a Kong-managed browser session cookie so the
+              # user isn't redirected to the IdP on every request.
+              auth_methods:
+                - authorization_code
+                - session
+              # Random long secret used to sign Kong's own session cookie.
+              # Generate one per environment, e.g.: openssl rand -hex 32
+              session_secret: REPLACE_WITH_A_RANDOM_SESSION_SECRET
+              session_cookie_name: kong_oidc_session
+              # Required by decK/Konnect so re-syncing this file doesn't
+              # regenerate session credentials each time. Generate one per
+              # environment, e.g.: openssl rand -hex 16
+              cache_tokens_salt: REPLACE_WITH_A_RANDOM_16_CHAR_SALT
+              # Where the IdP redirects back to after login; must be
+              # registered with the IdP application. This is Kong's public
+              # proxy port (8000), not Django's -- the browser only ever
+              # talks to Kong.
+              redirect_uri:
+                - http://localhost:8000/inventory/
+
+          # 2) Bridge the OIDC identity to a Django session. Kong logs into
+          #    Django as one fixed shared service account and forwards the
+          #    resulting sessionid cookie upstream -- Django only ever sees
+          #    that one technical user, never the individual OIDC identity.
+          #
+          #    REQUIRES the Kong Gateway node itself to allow these requires
+          #    in its Lua sandbox, or this fails with:
+          #      require("resty.http") not allowed within sandbox
+          #    Set on the node (not here -- decK can't configure this):
+          #      KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES=resty.http,cjson.safe
+          #    See kong/README-kong.md for details and the managed-data-plane
+          #    caveat.
+          - name: pre-function
+            config:
+              access:
+                - |
+                  local http = require "resty.http"
+                  local cjson = require "cjson.safe"
+
+                  -- Sample-only: hardcoded upstream login URL + shared
+                  -- service-account credentials. In a real deployment,
+                  -- source the password from a Kong Vault reference, e.g.
+                  -- config templated as "{vault://env/DJANGO_SERVICE_PASSWORD}",
+                  -- and make the login URL an env/vault value too.
+                  local django_login_url = "http://host.docker.internal:3333/api/auth/login/"
+                  local service_username = "kong_service"
+                  local service_password = "kong-service-demo-pw"
+
+                  local httpc = http.new()
+                  local res, err = httpc:request_uri(django_login_url, {
+                    method = "POST",
+                    body = cjson.encode({
+                      username = service_username,
+                      password = service_password,
+                    }),
+                    headers = {
+                      ["Content-Type"] = "application/json",
+                    },
+                  })
+
+                  if not res then
+                    kong.log.err("django session login request failed: ", err)
+                    return kong.response.exit(502, { message = "upstream session login failed" })
+                  end
+
+                  if res.status ~= 200 then
+                    kong.log.err("django rejected service-account login, status=", res.status)
+                    return kong.response.exit(502, { message = "upstream session login rejected" })
+                  end
+
+                  -- Django's login() always calls rotate_token() (a CSRF
+                  -- fixation defense), so this response carries TWO
+                  -- Set-Cookie headers -- csrftoken first, then sessionid.
+                  -- Scan all of them for the one we actually want instead
+                  -- of assuming the first entry is it.
+                  local set_cookie = res.headers["Set-Cookie"]
+                  local session_id
+
+                  if type(set_cookie) == "table" then
+                    for _, cookie in ipairs(set_cookie) do
+                      session_id = cookie:match("sessionid=([^;]+)")
+                      if session_id then
+                        break
+                      end
+                    end
+                  elseif set_cookie then
+                    session_id = set_cookie:match("sessionid=([^;]+)")
+                  end
+
+                  if not session_id then
+                    kong.log.err("no sessionid cookie in django login response")
+                    return kong.response.exit(502, { message = "upstream did not return a session" })
+                  end
+
+                  -- NOTE (sample simplification): this logs into Django on
+                  -- every proxied request. A production version should
+                  -- cache the sessionid per worker (e.g. kong.cache or an
+                  -- ngx.shared.DICT) keyed on nothing-request-specific,
+                  -- with a TTL kept below Django's SESSION_COOKIE_AGE, and
+                  -- only re-login on a cache miss or after Django returns
+                  -- 401/403 for the cached session.
+                  kong.service.request.set_header("Cookie", "sessionid=" .. session_id)
+              header_filter:
+                - |
+                  -- Defense in depth: never let Django's upstream session
+                  -- cookie leak back to the real client. Django's session
+                  -- middleware only resends Set-Cookie when the session is
+                  -- modified, but strip it unconditionally just in case.
+                  kong.response.clear_header("Set-Cookie")

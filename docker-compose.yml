@@ -1,0 +1,32 @@
+services:
+  django:
+    build: .
+    ports:
+      - "3333:3333"
+
+ ##### To run kong in a same docker container file
+ # kong:
+ #   # The openid-connect plugin used in kong/kong.yaml is Kong Enterprise
+ #   # only -- it isn't in the plain "kong" (OSS) image. Requires
+ #   # KONG_LICENSE_DATA (see below).
+ #   image: kong/kong-gateway:3.9
+ #   depends_on:
+ #     - django
+ #   environment:
+ #     KONG_DATABASE: "off"
+ #     KONG_DECLARATIVE_CONFIG: /kong/declarative/kong.yaml
+ #     KONG_PROXY_LISTEN: "0.0.0.0:8000"
+ #     KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+ #     # Required by the openid-connect plugin. Get a (free dev/trial)
+ #     # license from Konnect and export it as KONG_LICENSE_DATA before
+ #     # running `docker compose up`, e.g.:
+ #     #   export KONG_LICENSE_DATA="$(cat license.json)"
+ #     KONG_LICENSE_DATA: ${KONG_LICENSE_DATA:?set KONG_LICENSE_DATA to your Kong Enterprise license contents}
+ #     # Lets the pre-function plugin's Lua `require` an HTTP client to call
+ #     # Django's login endpoint -- see kong/README-kong.md.
+ #     KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES: resty.http,cjson.safe
+ #   volumes:
+ #     - ./kong/kong.yaml:/kong/declarative/kong.yaml:ro
+ #   ports:
+ #     - "8000:8000"   # proxy (what a browser/client talks to)
+ #     - "8001:8001"   # admin API (useful for local decK/debugging)
