@@ -1,7 +1,7 @@
 # Djangoに対して認証をするKong pluginのデモ
 
 ### 流れ
-Client(curl) ---> Kong API gateway (dp) ---> Django
+Client(curl) --(apikey認証)--> Kong API gateway (dp) --(basic 認証)--> Django
 
 ### 利用Kong Plugin
 - Key auth
@@ -10,41 +10,17 @@ Client(curl) ---> Kong API gateway (dp) ---> Django
 
 Key Authでapikey認証を行い、Datakitでハードコードされたusername+passwordをbase64でエンコードしてDjangoに対してBasic認証をする。
 
-.
-├── db.sqlite3
+pre functionの実装は参考として残しておく。
+この実装は、ハードコードされたユーザー名とパスワードを利用して、form loginを行いSessionの情報を取得する方法。
+このやり方は、通信が別で認証に発生するので遅いのと、管理が煩雑になる（luaのコードにクレデンシャルがハードコードされている）。
 
-├── docker-compose.yml
-
-├── Dockerfile
-
-├── inventory
-
-├── inventory_management
-
-├── kong
-
-│   ├── kong.yaml  <-- deckコマンドでdumpした設定
-
-│   ├── pre-function.kong.yaml
-
-│   └── README-kong.md
-
-├── manage.py
-
-├── README.md
-
-├── requirements.txt
-
-├── start_dp.sh
-
-└── staticfiles
 
 ###  利用方法
 
-1. Kong Konnect でControl PLaneを作る。
-2. Dataplaneをdockerで展開する。
+1. Kong KonnectでControl Planeを作る。
+2. Konnectの手順に従ってDataplaneをdockerで展開する。
 3. Git cloneでこのレポジトリをclone。
-4. docker compose --build up -d でDjangoを起動。
+4. `docker compose --build up -d` でDjangoを起動。
 5. kong/kong.yaml のdeckファイルをdeckコマンドでsyncする。（情報の修正が必要）
 6. 動作を確認する。
 
@@ -55,6 +31,16 @@ Kong data planeと同じホスト内でcurlを実行する場合のコマンド�
 ```
 curl -L -k https://127.0.0.1:8443/inventory/ -H "apikey:test" 
 ```
+inventoryの結果が出力されれば成功。
+
+### 補足
+Djangoを直接実行してデータを入力することなどが可能。
+```
+ブラウザで以下を開く
+http://127.0.0.1:3333/api/items
+```
+
+詳しくは、下記の英文説明を参照。（Claude謹製）
 
 
 # Inventory Management API (Django + DRF)
