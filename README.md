@@ -376,6 +376,29 @@ curl -k -i https://localhost:8443/oidc/inventory/                       # 302 ->
 curl -k -i https://localhost:8443/oidc/inventory/ -H "Authorization: Bearer bad"  # 401
 ```
 
+### Per-user rate limit
+
+Both `/oidc/inventory` routes have Kong's `rate-limiting` plugin: **10 requests/minute and
+200/hour per user**. `openid-connect` turns each token's `sub` claim into a virtual
+credential (`credential_claim`, default `sub`), and `rate-limiting` counts by it
+(`limit_by: credential`). So every Auth0 user and every M2M client has its own counter,
+with no Kong consumers to manage. Counting uses the verified token, not a
+client-supplied header, so it can't be bypassed by spoofing.
+
+```bash
+for i in $(seq 1 12); do
+  curl -sk -o /dev/null -w '%{http_code} ' -u "$AUTH0_M2M_CLIENT_ID:$AUTH0_M2M_CLIENT_SECRET" \
+    https://localhost:8443/oidc/inventory/
+done
+# 200 200 200 200 200 200 200 200 200 200 429 429
+```
+
+Responses include `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` and
+`X-RateLimit-Remaining-Minute/-Hour`. A `429` also has `Retry-After`.
+Change the limits in `kong/kong.yaml` (`&per_user_rate_limit`). `policy: local` keeps
+counters on each data plane node; with several nodes, use `policy: redis` so they share
+one counter. The apikey route (`/inventory`) and the web UI (`/items`) are not limited.
+
 ### 5. Web UI (`/items/`) through Kong
 
 The server-rendered UI is also behind Auth0. It uses the same Auth0 app and the same

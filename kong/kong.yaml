@@ -249,6 +249,32 @@ plugins:
   - http
   - https
   route: django-route-items-oidc-m2m
+# --- Per-user rate limit on the OIDC API routes. openid-connect turns the
+# token's "sub" claim into a virtual credential (credential_claim, default
+# [sub]), so limit_by: credential counts each Auth0 user / M2M client
+# separately without Kong consumers. Runs after openid-connect (lower
+# priority). policy: local = counters per data plane node; use redis when
+# running several nodes.
+- config: &per_user_rate_limit
+    limit_by: credential
+    minute: 10
+    hour: 200
+    policy: local
+  enabled: true
+  instance_name: oidc-rate-limit-browser
+  name: rate-limiting
+  protocols:
+  - http
+  - https
+  route: django-route-items-oidc
+- config: *per_user_rate_limit
+  enabled: true
+  instance_name: oidc-rate-limit-m2m
+  name: rate-limiting
+  protocols:
+  - http
+  - https
+  route: django-route-items-oidc-m2m
 # --- Web UI route (/items): same Auth0 app and session cookie as
 # /oidc/inventory (one login covers both), browser login only. Django's
 # RemoteUserBackend logs the user in from X-Authenticated-User, which this
