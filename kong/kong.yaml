@@ -68,7 +68,7 @@ plugins:
                         -- source the password from a Kong Vault reference, e.g.
                         -- config templated as "{vault://env/DJANGO_SERVICE_PASSWORD}",
                         -- and make the login URL an env/vault value too.
-                        local django_login_url = "http://192.168.106.2:3333/api/auth/login/"
+                        local django_login_url = "http://django:3333/api/auth/login/"
                         local service_username = "kong_service"
                         local service_password = "kong-service-demo-pw"
 
@@ -139,7 +139,7 @@ plugins:
 # --- OIDC route (/oidc/inventory): Auth0 login for browsers (session cookie)
 # and OAuth2 for curl/apps (Bearer JWT or client_credentials). Values come
 # from env, see kong/auth0.env.example and README "OIDC with Auth0".
-- config:
+- config: &basic_auth_datakit
     nodes:
     - name: creds
       type: static
@@ -160,7 +160,7 @@ plugins:
   - http
   - https
   route: django-route-items-oidc
-- config:
+- config: &auth0_oidc_config
     issuer: "${{ env "DECK_AUTH0_ISSUER" }}"
     # Required on Kong 3.16+: tls_certificate_verify is on globally, and the
     # DP rejects the whole config if ssl_verify is left at its default (false).
@@ -178,26 +178,19 @@ plugins:
     - openid
     - profile
     - email
-    # authorization_code + session: browser login, then Kong session cookie
-    # bearer: Auth0 access token (JWT) from curl/apps
-    # client_credentials: client id/secret sent to Kong as Basic auth
+    # Browser login, then Kong session cookie. Apps (Authorization header)
+    # are routed to django-route-items-oidc-m2m instead, see below.
     auth_methods:
     - authorization_code
     - session
-    - bearer
-    - client_credentials
     client_credentials_param_type:
     - header
     # Auth0 only issues JWT access tokens when an API audience is requested
     audience_required:
     - "${{ env "DECK_AUTH0_AUDIENCE" }}"
-    authorization_query_args_names:
-    - audience
-    authorization_query_args_values:
-    - "${{ env "DECK_AUTH0_AUDIENCE" }}"
-    token_post_args_names:
-    - audience
-    token_post_args_values:
+    # Sent on the authorize redirect. Kong's client_credentials token request
+    # doesn't carry it, so the Auth0 tenant's Default Audience must be this API.
+    audience:
     - "${{ env "DECK_AUTH0_AUDIENCE" }}"
     # Browser session management (Kong-side encrypted cookie)
     session_secret: "${{ env "DECK_OIDC_SESSION_SECRET" }}"
@@ -230,8 +223,78 @@ plugins:
   - http
   - https
   route: django-route-items-oidc
+# --- Machine route: same path, but only requests carrying an Authorization
+# header (Bearer JWT or Basic client id:secret). Separate plugin instance
+# because Auth0 refuses client_credentials requests that ask for the
+# openid/profile/email scopes the browser login needs, and the plugin sends
+# its "scopes" on every token request.
+- config:
+    <<: *auth0_oidc_config
+    auth_methods:
+    - bearer
+    - client_credentials
+    scopes: []
+  enabled: true
+  instance_name: auth0-oidc-m2m
+  name: openid-connect
+  protocols:
+  - http
+  - https
+  route: django-route-items-oidc-m2m
+- config: *basic_auth_datakit
+  enabled: true
+  instance_name: oidc-m2m-create-basic-auth
+  name: datakit
+  protocols:
+  - http
+  - https
+  route: django-route-items-oidc-m2m
+# --- Web UI route (/items): same Auth0 app and session cookie as
+# /oidc/inventory (one login covers both), browser login only. Django's
+# RemoteUserBackend logs the user in from X-Authenticated-User, which this
+# plugin always overwrites with the verified "sub" claim.
+- config:
+    <<: *auth0_oidc_config
+    redirect_uri:
+    - https://localhost:8443/items/
+    logout_redirect_uri:
+    - https://localhost:8443/items/
+    auth_methods:
+    - authorization_code
+    - session
+  enabled: true
+  instance_name: auth0-oidc-web
+  name: openid-connect
+  protocols:
+  - http
+  - https
+  route: django-route-web
+# /inventory and /static have no openid-connect plugin to overwrite
+# X-Authenticated-User, so strip any client-sent copy before Django sees it.
+- config:
+    remove:
+      headers:
+      - X-Authenticated-User
+  enabled: true
+  instance_name: strip-identity-apikey
+  name: request-transformer
+  protocols:
+  - http
+  - https
+  route: django-route-items
+- config:
+    remove:
+      headers:
+      - X-Authenticated-User
+  enabled: true
+  instance_name: strip-identity-static
+  name: request-transformer
+  protocols:
+  - http
+  - https
+  route: django-route-static
 services:
-- host: 192.168.106.2
+- host: django
   name: django-api-items
   path: /api/items
   port: 3333
@@ -258,11 +321,25 @@ services:
     - /oidc/inventory
     protocols:
     - https
+  - headers:
+      Authorization:
+      - "~*^(Bearer|Basic) "
+    methods:
+    - GET
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+    name: django-route-items-oidc-m2m
+    paths:
+    - /oidc/inventory
+    protocols:
+    - https
 # Django static assets (DRF browsable API / admin CSS, JS, images), served by
 # whitenoise. DRF pages reference them as absolute /static/... URLs, which
 # fall outside /oidc/inventory, so they need their own route. Left public on
 # purpose: these are stock framework assets with no user data.
-- host: 192.168.106.2
+- host: django
   name: django-static
   path: /static
   port: 3333
@@ -275,3 +352,18 @@ services:
     - /static
     protocols:
     - https
+# Django server-rendered web UI (/items/, /items/add/, ...). No path
+# rewrite: Django's own links and redirects already use /items/...
+- host: django
+  name: django-web
+  port: 3333
+  routes:
+  - methods:
+    - GET
+    - POST
+    name: django-route-web
+    paths:
+    - /items
+    protocols:
+    - https
+    strip_path: false

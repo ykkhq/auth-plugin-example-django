@@ -33,8 +33,13 @@
     <span class="brand">📦 Inventory</span>
     <nav>
       {% if user.is_authenticated %}
-        <span>{{ user.username }}</span>
-        <form class="inline" method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn btn-secondary" type="submit">Log out</button></form>
+        <span>{{ user.email|default:user.username }}</span>
+        {% if request.META.HTTP_X_AUTHENTICATED_USER %}
+          {# Kong's openid-connect plugin handles /items/logout: ends the Kong + Auth0 session #}
+          <a class="btn btn-secondary" href="/items/logout">Log out</a>
+        {% else %}
+          <form class="inline" method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn btn-secondary" type="submit">Log out</button></form>
+        {% endif %}
       {% else %}
         <a href="{% url 'login' %}">Log in</a>
       {% endif %}

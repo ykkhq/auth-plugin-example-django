@@ -312,16 +312,21 @@ const NODES = [
   { id: 'kong', group: true, x: 690, y: 130, icon: 'gateway', title: 'Kong Gateway 3.16', sub: 'data plane · https://localhost:8443' },
   { id: 'oidc', parent: 'kong', w: 300, icon: 'lock', tint: '#6366f1', mono: true, title: '/oidc/inventory', sub: 'django-route-items-oidc',
     chips: ['openid-connect', 'datakit'],
-    rows: [{ k: 'browser', v: 'authorization_code · session' }, { k: 'apps', v: 'bearer · client_credentials' },
+    rows: [{ k: 'browser', v: 'authorization_code · session' }, { k: 'apps', v: 'bearer · client_credentials (-m2m route)' },
            { k: 'session', v: 'idle 15m · roll 1h · abs 8h' }, { k: 'ssl_verify', v: 'true' }] },
+  { id: 'web', parent: 'kong', w: 300, icon: 'browser', tint: '#0ea5e9', mono: true, title: '/items', sub: 'django-route-web',
+    chips: ['openid-connect'],
+    rows: [{ k: 'auth', v: 'authorization_code · session' }, { k: 'session', v: 'shared inventory_session' },
+           { k: 'sets', v: 'X-Authenticated-User = sub' }] },
   { id: 'key', parent: 'kong', w: 300, icon: 'key', tint: '#ec4899', mono: true, title: '/inventory', sub: 'django-route-items',
-    chips: ['key-auth', 'datakit'], rows: [{ k: 'consumer', v: 'user1' }] },
+    chips: ['key-auth', 'datakit', 'request-transformer'],
+    rows: [{ k: 'consumer', v: 'user1' }, { k: 'strips', v: 'X-Authenticated-User' }] },
   { id: 'static', parent: 'kong', w: 300, icon: 'file', mono: true, title: '/static', sub: 'django-route-static',
-    chips: ['no auth · GET/HEAD'] },
+    chips: ['no auth · GET/HEAD', 'request-transformer'] },
   { id: 'cp', x: 1140, y: -10, w: 240, icon: 'cloud', title: 'Konnect', sub: 'control plane · django-apigw',
     rows: [{ k: 'decK', v: 'kong/kong.yaml' }] },
-  { id: 'django', x: 1140, y: 270, w: 260, icon: 'db', tint: '#0c4b33', title: 'Django + DRF', sub: 'gunicorn · :3333',
-    rows: [{ id: 'api', k: '/api/items/', v: 'Basic auth' }, { id: 'hdr', k: 'X-Authenticated-*', v: 'OIDC identity' },
+  { id: 'django', x: 1140, y: 270, w: 260, icon: 'db', tint: '#0c4b33', title: 'Django + DRF', sub: 'django:3333 · kong-net only',
+    rows: [{ id: 'webui', k: '/items/', v: 'web UI · RemoteUserBackend' }, { id: 'api', k: '/api/items/', v: 'Basic auth' }, { id: 'hdr', k: 'X-Authenticated-*', v: 'OIDC identity' },
            { id: 'st', k: '/static/', v: 'whitenoise' }] },
 ];
 
@@ -329,6 +334,7 @@ const NODES = [
 const EDGES = [
   { id: 'b_oidc', s: 'browser', sh: { s: 'r', f: .42 }, t: 'oidc', th: { s: 'l', f: .28 }, label: 'HTTPS · session cookie', lt: .45 },
   { id: 'b_auth0', s: 'browser', sh: { s: 't', f: .6 }, t: 'auth0', th: { s: 'l', f: .5 }, label: 'login redirect', lt: .5 },
+  { id: 'b_web', s: 'browser', sh: { s: 'r', f: .6 }, t: 'web', th: { s: 'l', f: .3 }, label: 'web UI · session cookie', lt: .55 },
   { id: 'b_static', s: 'browser', sh: { s: 'r', f: .78 }, t: 'static', th: { s: 'l', f: .5 }, label: 'CSS · JS', lt: .78 },
   { id: 'app_auth0', s: 'app', sh: { s: 'r', f: .18 }, t: 'auth0', th: { s: 'b', f: .3 }, label: '/oauth/token', lt: .55 },
   { id: 'app_oidc', s: 'app', sh: { s: 'r', f: .4 }, t: 'oidc', th: { s: 'l', f: .7 }, label: 'Bearer · Basic id:secret', lt: .45 },
@@ -336,6 +342,8 @@ const EDGES = [
   { id: 'mcp_aigw', s: 'mcp', sh: { s: 'r', f: .5 }, t: 'aigw', th: { s: 'l', f: .5 }, label: 'MCP · apikey', lt: .5 },
   { id: 'aigw_key', s: 'aigw', sh: { s: 'r', f: .45 }, t: 'key', th: { s: 'l', f: .75 }, label: 'REST · apikey', lt: .55 },
   { id: 'oidc_auth0', s: 'oidc', sh: { s: 't', f: .8 }, t: 'auth0', th: { s: 'r', f: .55 }, label: 'code → token · JWKS', lt: .55 },
+  { id: 'web_auth0', s: 'web', sh: { s: 'l', f: .8 }, t: 'auth0', th: { s: 'b', f: .75 }, label: 'code → token', lt: .35 },
+  { id: 'web_django', s: 'web', sh: { s: 'r', f: .5 }, t: 'django', th: { s: 'l', row: 'webui' }, label: 'X-Authenticated-User', lt: .5 },
   { id: 'oidc_django', s: 'oidc', sh: { s: 'r', f: .5 }, t: 'django', th: { s: 'l', row: 'hdr' }, label: 'Basic · X-Authenticated-*', lt: .5 },
   { id: 'key_django', s: 'key', sh: { s: 'r', f: .5 }, t: 'django', th: { s: 'l', row: 'api' }, label: 'Basic', lt: .5 },
   { id: 'static_django', s: 'static', sh: { s: 'r', f: .5 }, t: 'django', th: { s: 'l', row: 'st' }, label: 'whitenoise', lt: .5 },
@@ -345,8 +353,8 @@ const EDGES = [
 // d: 1 = request along the edge, -1 = response back
 const FLOWS = {
   browser: {
-    name: 'Browser · OIDC session', color: '#6366f1',
-    desc: 'Authorization code + PKCE with Auth0, then a Kong-side encrypted session cookie.',
+    name: 'Browser · API', color: '#6366f1',
+    desc: 'DRF browsable API on /oidc/inventory: authorization code + PKCE with Auth0, then a Kong-side encrypted session cookie.',
     steps: [
       { e: 'b_oidc', d: 1, t: 'Request without a session', c: 'GET /oidc/inventory/ — no inventory_session cookie' },
       { e: 'b_oidc', d: -1, t: 'Kong redirects to Auth0', c: '302 → /authorize?response_type=code&code_challenge=…&audience=…&state=…' },
@@ -361,6 +369,26 @@ const FLOWS = {
       { e: 'static_django', d: 1, t: 'Served by whitenoise', c: 'Kong /static → Django :3333/static' },
       { e: 'b_oidc', d: 1, t: 'Logout', c: 'GET /oidc/inventory/logout → Kong drops the session' },
       { e: 'b_auth0', d: 1, t: 'IdP session ended', c: 'Auth0 end_session → back to logout_redirect_uri' },
+    ],
+  },
+  web: {
+    name: 'Browser · web UI', color: '#0ea5e9',
+    desc: "Django web UI on /items: Auth0 login at Kong, then Django's built-in RemoteUserBackend logs in the same user. Only Kong can reach Django (kong-net).",
+    steps: [
+      { e: 'b_web', d: 1, t: 'Open the UI', c: 'GET /items/ — no inventory_session cookie' },
+      { e: 'b_web', d: -1, t: 'Kong redirects to Auth0', c: '302 → /authorize · redirect_uri=https://localhost:8443/items/' },
+      { e: 'b_auth0', d: 1, t: 'User signs in', c: 'Auth0 Universal Login' },
+      { e: 'b_auth0', d: -1, t: 'Auth0 returns the code', c: '302 → /items/?code=…&state=…' },
+      { e: 'b_web', d: 1, t: 'Callback reaches Kong', c: 'openid-connect checks state + PKCE verifier' },
+      { e: 'web_auth0', d: 1, t: 'Code exchanged for tokens', c: 'POST /oauth/token · ID + access token verified via JWKS' },
+      { e: 'b_web', d: -1, t: 'Session cookie issued', c: 'Set-Cookie: inventory_session — the same cookie /oidc/inventory accepts' },
+      { e: 'b_web', d: 1, t: 'Authenticated by session', c: 'cookie only from now on · idle 15 min · rolling 1 h · absolute 8 h' },
+      { e: 'web_django', d: 1, t: 'Identity forwarded', c: 'X-Authenticated-User = verified sub (overwrites any client value) → http://django:3333 on kong-net' },
+      { e: 'web_django', d: 1, t: 'Django logs the user in', c: 'built-in RemoteUserBackend · Django user created on first visit · no published port, so only Kong can send this header' },
+      { e: 'web_django', d: -1, t: 'Page rendered', c: 'item list · forms carry Django CSRF token' },
+      { e: 'b_web', d: 1, t: 'Submit a form', c: 'POST /items/add/ · csrfmiddlewaretoken · Origin https://localhost:8443 (CSRF_TRUSTED_ORIGINS)' },
+      { e: 'b_web', d: 1, t: 'Log out', c: 'GET /items/logout → Kong drops the session' },
+      { e: 'b_auth0', d: 1, t: 'IdP session ended', c: 'Auth0 end_session → back to https://localhost:8443/items/' },
     ],
   },
   bearer: {
@@ -380,7 +408,7 @@ const FLOWS = {
     desc: 'The app sends its client id/secret to Kong; Kong fetches and caches the token.',
     steps: [
       { e: 'app_oidc', d: 1, t: 'Send client credentials', c: 'Authorization: Basic base64(m2m_client_id:secret)' },
-      { e: 'oidc_auth0', d: 1, t: 'Kong requests a token', c: 'POST /oauth/token · client_credentials · audience via token_post_args' },
+      { e: 'oidc_auth0', d: 1, t: 'Kong requests a token', c: 'POST /oauth/token · client_credentials · audience from the Auth0 tenant Default Audience' },
       { e: 'oidc_auth0', d: -1, t: 'Token cached', c: 'access_token kept in Kong cache (cache_tokens, salted)' },
       { e: 'oidc_django', d: 1, t: 'Proxied to Django', c: 'DataKit Basic auth → /api/items/' },
       { e: 'app_oidc', d: -1, t: 'Response', c: '200 application/json' },
@@ -390,7 +418,7 @@ const FLOWS = {
     name: 'apikey · MCP', color: '#ec4899',
     desc: 'The original key-auth route. Kong AI Gateway uses it as the MCP upstream.',
     steps: [
-      { e: 'app_key', d: 1, t: 'Direct apikey call', c: "curl -H 'apikey: test' https://localhost:8443/inventory/" },
+      { e: 'app_key', d: 1, t: 'Direct apikey call', c: "curl -H 'apikey: test' https://localhost:8443/inventory/ · request-transformer strips any X-Authenticated-User" },
       { e: 'mcp_aigw', d: 1, t: 'MCP tool call', c: 'JSON-RPC tools/call · apikey header · /mcp/inventory' },
       { e: 'aigw_key', d: 1, t: 'Tool → REST', c: 'https://host.docker.internal:8443/inventory/… · apikey forwarded · private CA' },
       { e: 'key_django', d: 1, t: 'key-auth + DataKit', c: 'consumer user1 · Authorization: Basic → /api/items/' },
@@ -400,11 +428,11 @@ const FLOWS = {
   },
   all: { name: 'All', color: '#71717a', desc: 'Every route on one canvas. Pick a flow to step through it.' },
 };
-const ORDER = ['browser', 'bearer', 'cc', 'apikey', 'all'];
+const ORDER = ['web', 'browser', 'bearer', 'cc', 'apikey', 'all'];
 
 const byId = Object.fromEntries(NODES.map(n => [n.id, n]));
 const E = Object.fromEntries(EDGES.map(e => [e.id, e]));
-const state = { x: 0, y: 0, z: 1, flow: 'browser', step: 0, playing: false, sel: null, t0: performance.now() };
+const state = { x: 0, y: 0, z: 1, flow: 'web', step: 0, playing: false, sel: null, t0: performance.now() };
 
 // ---------------------------------------------------------------- nodes
 const icon = n => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${ICONS[n]}</svg>`;

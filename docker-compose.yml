@@ -1,8 +1,17 @@
 services:
   django:
     build: .
-    ports:
-      - "3333:3333"
+    # No published port: Django trusts the X-Authenticated-User header Kong
+    # sends (inventory/gateway.py), so only Kong may reach it. The Kong data
+    # plane joins kong-net and calls http://django:3333.
+    #   docker network connect kong-net <kong-dp-container>
+    # For local debugging only (anyone on this host could then fake a user):
+    # ports:
+    #   - "127.0.0.1:3333:3333"
+    networks:
+      - kong-net
+    environment:
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-https://localhost:8443}
 
  ##### To run kong in a same docker container file
  # kong:
@@ -30,3 +39,7 @@ services:
  #   ports:
  #     - "8000:8000"   # proxy (what a browser/client talks to)
  #     - "8001:8001"   # admin API (useful for local decK/debugging)
+
+networks:
+  kong-net:
+    name: kong-net

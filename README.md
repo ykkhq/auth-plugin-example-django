@@ -42,11 +42,13 @@ curl -L -k https://127.0.0.1:8443/inventory/ -H "apikey:test"
 inventoryの結果が出力されれば成功。
 
 ### 補足
-Djangoを直接実行してデータを入力することなどが可能。
+DjangoのWeb UIはKong経由で開く（Auth0でログイン）。
 ```
 ブラウザで以下を開く
-http://127.0.0.1:3333/api/items
+https://localhost:8443/items/
 ```
+Djangoのポート3333は公開していない（Kongが渡すユーザーヘッダーを信頼するため、Kong以外から直接アクセスさせない）。
+デバッグ時のみ `docker-compose.yml` の `127.0.0.1:3333` を有効化する。
 
 ### MCP
 Kong AI Gateway 2.2 で全エンドポイントを MCP ツールとして公開（upstream は Kong API Gateway）。`MCP_README.md` を参照。
@@ -91,8 +93,12 @@ docker compose up --build
 ```
 
 This builds the image, runs migrations, seeds demo data, collects static
-files, and serves the app with **gunicorn** on port `3333`. The API is
-then reachable at `http://localhost:3333/api/...`.
+files, and serves the app with **gunicorn** on port `3333`. The container
+joins the private `kong-net` network and **doesn't publish the port**,
+because Django trusts the user header Kong sends (see "Web UI through Kong"
+below). Reach it through Kong, or for local debugging uncomment the
+`127.0.0.1:3333` port in `docker-compose.yml`. With the port published, anyone
+on the host could fake a user.
 
 Gunicorn (not `manage.py runserver`) is used here specifically because
 this container is meant to sit behind Kong: Django's dev server doesn't
@@ -201,13 +207,24 @@ on two routes of the same service. Both inject Django Basic auth with DataKit.
 |---------------------------|----------------------------------------------------|
 | `/inventory/...`          | `apikey` header (key-auth); also used by the MCP server |
 | `/oidc/inventory/...`     | Auth0 OIDC: browser session cookie, Bearer JWT, or client_credentials |
+| `/items/...`              | Auth0 OIDC browser login (shared session). Django web UI logged in as the Auth0 user |
 | `/static/...`             | None. Django/DRF CSS, JS, and images (whitenoise), needed by the browsable API pages |
 
 See `kong/README-kong.md` for topology notes.
 
 ## OIDC with Auth0 (browser session + OAuth2 clients)
 
-A single `openid-connect` plugin on `/oidc/inventory` covers both kinds of client:
+`/oidc/inventory` serves both kinds of client. It is two Kong routes on the same path,
+each with its own `openid-connect` plugin (same Auth0 config):
+
+- `django-route-items-oidc-m2m` matches requests that carry an `Authorization: Bearer …`
+  or `Authorization: Basic …` header. It allows `bearer` and `client_credentials`, and
+  sends **no scopes**. Auth0 rejects a client_credentials request that asks for
+  `openid profile email` (`403 Client has not been granted scopes`), and the plugin
+  sends its `scopes` on every token request.
+- `django-route-items-oidc` handles everything else (browsers). It allows
+  `authorization_code` and `session`, with scopes `openid profile email`.
+
 
 ```
 Browser --(no cookie)--> Kong --302--> Auth0 login --callback--> Kong
@@ -273,7 +290,13 @@ In the Auth0 dashboard (https://manage.auth0.com):
    `end_session_endpoint` to the discovery document, which Kong's
    `/logout` uses to also end the Auth0 session.
 
-5. **Create a test user** (User Management > Users > Create User,
+5. **Set the Default Audience** (Settings > General > API Authorization Settings >
+   *Default Audience* = `https://inventory-api`, your API identifier). When an app
+   sends its client id/secret to Kong (client_credentials), Kong's token request to
+   Auth0 can't include `audience`, and Auth0 answers `403 access_denied: No audience
+   parameter was provided`. The default audience fills that in.
+
+6. **Create a test user** (User Management > Users > Create User,
    *Username-Password-Authentication* connection), or log in with a social connection.
 
 If you use a host other than `localhost:8443`, change `redirect_uri` and
@@ -353,8 +376,60 @@ curl -k -i https://localhost:8443/oidc/inventory/                       # 302 ->
 curl -k -i https://localhost:8443/oidc/inventory/ -H "Authorization: Bearer bad"  # 401
 ```
 
+### 5. Web UI (`/items/`) through Kong
+
+The server-rendered UI is also behind Auth0. It uses the same Auth0 app and the same
+`inventory_session` cookie, so one login covers both `/items/` and `/oidc/inventory/`.
+Django's side is its built-in remote-user support. No extra package is needed.
+
+```
+Browser --(Auth0 login / inventory_session)--> Kong /items  [openid-connect]
+        --(X-Authenticated-User = Auth0 "sub")--> django:3333/items/   (kong-net only)
+```
+
+- Kong's `openid-connect` plugin sets `X-Authenticated-User` to the verified `sub`
+  claim on every request. This replaces any value the client sent.
+- Django logs that user in with `RemoteUserBackend`, creating the Django user on the
+  first visit. `inventory/gateway.py` is the 2-line `PersistentRemoteUserMiddleware`
+  subclass that reads that header; this is the pattern Django's docs recommend.
+- **Django trusts the header because only Kong can reach it.** Django runs on the
+  private `kong-net` Docker network with no published port, and Kong calls it at
+  `http://django:3333`. The `/inventory` (apikey) and `/static` routes have no OIDC
+  plugin to overwrite the header, so a `request-transformer` strips any
+  client-sent copy there.
+- The add, edit and delete forms keep Django's CSRF protection.
+  `CSRF_TRUSTED_ORIGINS=https://localhost:8443` makes Django accept form posts
+  that come through Kong.
+- **Log out** goes to `/items/logout`. Kong ends the Kong session and the Auth0 session.
+- The UI shows the Django username, which is the Auth0 `sub`
+  (e.g. `auth0|66ab…`). To show emails instead, add an Auth0 Action that puts
+  `email` into the access token, and forward that claim as the user header.
+
+Setup:
+
+1. Auth0 → your Regular Web Application → add `https://localhost:8443/items/` to
+   **Allowed Callback URLs** and **Allowed Logout URLs**.
+2. Start Django on `kong-net`, and attach the Kong data plane to the same network:
+   ```bash
+   docker compose up --build -d                      # creates kong-net
+   docker network connect kong-net <kong-dp-container>
+   docker restart <kong-dp-container>                # Kong reads DNS at startup
+   ```
+   Or add `--network kong-net` to the data plane's `docker run` command.
+3. Sync Kong:
+   ```bash
+   source kong/auth0.env
+   deck gateway sync kong/kong.yaml --konnect-token-file ~/.kong/kpat \
+     --konnect-control-plane-name django-apigw
+   ```
+4. Open `https://localhost:8443/items/`, sign in at Auth0, and you land on the item list.
+
 ### Troubleshooting
 
+- **`503` and `DNS resolution failed ... django` in the data plane log**: the Kong
+  container isn't on `kong-net`, or it was attached without a restart afterwards.
+- **`403 CSRF verification failed`** on a form: `CSRF_TRUSTED_ORIGINS` doesn't
+  include the URL in the browser's address bar.
 - **The browser lands on `/oidc/inventory/?error=invalid_request&error_description=Client "..." is not authorized to access resource server "..."`**:
   the Regular Web Application has no *User Access* to the API. See step 1.2.
   If the error names the M2M client instead, its *Client Access* is
@@ -372,8 +447,9 @@ curl -k -i https://localhost:8443/oidc/inventory/ -H "Authorization: Bearer bad"
 - **`401` with a valid-looking token**: `aud` doesn't contain
   `DECK_AUTH0_AUDIENCE`, or the token is opaque because no audience was
   requested. Decode it at https://jwt.io to check.
-- **`client_credentials` returns `401`**: the M2M app isn't authorized for
-  the API (step 1.3), or *Client Credentials* isn't one of its grant types.
+- **`client_credentials` through Kong returns `401`**: the tenant's Default Audience
+  isn't set (step 1.5), the M2M app isn't authorized for the API (step 1.3), or
+  *Client Credentials* isn't one of its grant types.
 - **Logout doesn't end the Auth0 session**: RP-initiated logout discovery
   (step 1.4) is off, or the logout URL isn't in *Allowed Logout URLs*.
 - **Everyone is logged out after a sync**: `DECK_OIDC_SESSION_SECRET`
