@@ -1,0 +1,750 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventory Auth Flows</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #ffffff;
+  --dot: #d4d4d8;
+  --node: #ffffff;
+  --node-b: #e4e4e7;
+  --sel: #1a192b;
+  --text: #18181b;
+  --muted: #71717a;
+  --edge: #b1b1b7;
+  --edge-dim: #e7e7ea;
+  --label-bg: #ffffff;
+  --label-t: #3f3f46;
+  --handle: #1a192b;
+  --panel: #ffffff;
+  --panel-b: #e4e4e7;
+  --chip: #f4f4f5;
+  --group: rgba(244, 244, 245, .6);
+  --group-b: #d4d4d8;
+  --mask: rgba(240, 240, 242, .75);
+  --mini-node: #e4e4e7;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .05), 0 2px 6px rgba(0, 0, 0, .06);
+  --flow: #6366f1;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141414; --dot: #2e2e33; --node: #1e1e20; --node-b: #34343a; --sel: #e4e4e7;
+    --text: #f4f4f5; --muted: #a1a1aa; --edge: #5b5b63; --edge-dim: #26262a;
+    --label-bg: #1e1e20; --label-t: #d4d4d8; --handle: #e4e4e7; --panel: #1e1e20;
+    --panel-b: #34343a; --chip: #2a2a2e; --group: rgba(39, 39, 42, .45); --group-b: #3f3f46;
+    --mask: rgba(20, 20, 20, .75); --mini-node: #3f3f46;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 2px 8px rgba(0, 0, 0, .35);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141414; --dot: #2e2e33; --node: #1e1e20; --node-b: #34343a; --sel: #e4e4e7;
+  --text: #f4f4f5; --muted: #a1a1aa; --edge: #5b5b63; --edge-dim: #26262a;
+  --label-bg: #1e1e20; --label-t: #d4d4d8; --handle: #e4e4e7; --panel: #1e1e20;
+  --panel-b: #34343a; --chip: #2a2a2e; --group: rgba(39, 39, 42, .45); --group-b: #3f3f46;
+  --mask: rgba(20, 20, 20, .75); --mini-node: #3f3f46;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 2px 8px rgba(0, 0, 0, .35);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow: hidden;
+}
+code, .mono { font-family: var(--mono); }
+
+/* ---------- canvas ---------- */
+#flow {
+  position: fixed; inset: 0;
+  background-color: var(--bg);
+  background-image: radial-gradient(circle, var(--dot) 1px, transparent 1.2px);
+  background-size: 20px 20px;
+  touch-action: none;
+  cursor: default;
+}
+#flow.panning { cursor: grabbing; }
+#vp { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.layer { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+#groups, #nodes { position: absolute; left: 0; top: 0; }
+
+/* ---------- nodes ---------- */
+.node {
+  position: absolute; left: 0; top: 0;
+  background: var(--node);
+  border: 1px solid var(--node-b);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  cursor: grab;
+  user-select: none;
+  transition: opacity .25s, border-color .2s, box-shadow .2s;
+}
+.node.dragging { cursor: grabbing; }
+.node.sel { border-color: var(--sel); box-shadow: 0 0 0 1px var(--sel), var(--shadow); }
+.node.dim { opacity: .32; }
+.node.on { border-color: color-mix(in srgb, var(--flow) 55%, var(--node-b)); }
+.hd { display: flex; gap: 10px; align-items: center; padding: 10px 12px; }
+.ic {
+  width: 30px; height: 30px; flex: none;
+  border-radius: 8px; display: grid; place-items: center;
+  background: var(--chip); color: var(--muted);
+}
+.ti { font-weight: 600; font-size: 13px; letter-spacing: -.01em; }
+.ti.mono { font-size: 12.5px; font-weight: 500; }
+.su { color: var(--muted); font-size: 11px; font-family: var(--mono); }
+.body { border-top: 1px solid var(--node-b); padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 5px; }
+.chips { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 2px; }
+.chip {
+  font: 500 10.5px var(--mono);
+  padding: 1px 6px; border-radius: 5px;
+  background: var(--chip); border: 1px solid var(--node-b); color: var(--text);
+}
+.row { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; }
+.row code { font-size: 10.5px; color: var(--text); }
+.row span { color: var(--muted); text-align: right; }
+.group {
+  background: var(--group);
+  border: 1px dashed var(--group-b);
+  border-radius: 14px;
+  box-shadow: none;
+}
+.group .hd { padding: 12px 14px; }
+
+/* ---------- edges ---------- */
+.edge { fill: none; stroke: var(--edge); stroke-width: 1.5; transition: stroke .2s, opacity .2s; }
+.edge.cfg { stroke-dasharray: 4 4; }
+.edge.in { stroke: var(--flow); stroke-dasharray: 5; animation: dash .6s linear infinite; }
+.edge.cur { stroke-width: 2.75; stroke-dasharray: none; animation: none; }
+.edge.dim { stroke: var(--edge-dim); }
+.edge.hl { stroke: var(--sel); stroke-width: 2; }
+@keyframes dash { to { stroke-dashoffset: -10; } }
+.elabel rect { fill: var(--label-bg); stroke: var(--node-b); }
+.elabel text { font: 500 10px Inter, system-ui, sans-serif; fill: var(--label-t); }
+.elabel.dim { opacity: .28; }
+.elabel.cur rect { stroke: var(--flow); }
+.elabel.cur text { fill: var(--flow); font-weight: 600; }
+.handle { fill: var(--handle); stroke: var(--node); stroke-width: 1.5; }
+#dot { fill: var(--flow); }
+#dotRing { fill: var(--flow); opacity: .22; }
+@media (prefers-reduced-motion: reduce) { .edge.in { animation: none; } }
+
+/* ---------- panels ---------- */
+.panel {
+  position: absolute; z-index: 10;
+  background: var(--panel);
+  border: 1px solid var(--panel-b);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+#title { top: 16px; left: 16px; padding: 12px 14px; max-width: calc(100% - 32px); }
+#title h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -.01em; }
+#title p { margin: 2px 0 10px; color: var(--muted); font-size: 11.5px; }
+#tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: 500 12px Inter, system-ui, sans-serif;
+  padding: 5px 9px; border-radius: 7px;
+  border: 1px solid var(--panel-b); background: var(--panel); color: var(--text);
+  cursor: pointer; white-space: nowrap;
+}
+.tab:hover { background: var(--chip); }
+.tab[aria-selected="true"] { border-color: var(--sel); box-shadow: 0 0 0 1px var(--sel); }
+.sw { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+
+#steps {
+  top: 16px; right: 16px; width: 360px;
+  max-height: calc(100% - 196px);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+#steps header { padding: 12px 14px 10px; border-bottom: 1px solid var(--panel-b); }
+#steps header h2 { margin: 0; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+#steps header p { margin: 4px 0 0; color: var(--muted); font-size: 11.5px; }
+#list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1; }
+#list li {
+  display: grid; grid-template-columns: 22px 1fr; gap: 8px;
+  padding: 7px 8px; border-radius: 7px; cursor: pointer;
+}
+#list li:hover { background: var(--chip); }
+#list li.cur { background: color-mix(in srgb, var(--flow) 12%, transparent); }
+#list .n {
+  width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center;
+  font: 600 10px Inter, system-ui, sans-serif;
+  border: 1px solid var(--panel-b); color: var(--muted);
+}
+#list li.cur .n { background: var(--flow); border-color: var(--flow); color: #fff; }
+#list li.done .n { border-color: var(--flow); color: var(--flow); }
+#list b { font-weight: 600; font-size: 12px; display: block; }
+#list code { font-size: 10.5px; color: var(--muted); display: block; word-break: break-word; margin-top: 1px; }
+#list .dir { font: 500 10px Inter, system-ui, sans-serif; color: var(--muted); margin-left: 4px; }
+#list.legend li { grid-template-columns: 14px 1fr; align-items: start; }
+#list.legend .sw { margin-top: 4px; }
+#steps footer {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px; border-top: 1px solid var(--panel-b);
+}
+#steps footer .count { margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.btn {
+  height: 28px; min-width: 28px; padding: 0 8px;
+  display: inline-grid; place-items: center;
+  border: 1px solid var(--panel-b); border-radius: 7px;
+  background: var(--panel); color: var(--text);
+  font: 500 12px Inter, system-ui, sans-serif; cursor: pointer;
+}
+.btn:hover { background: var(--chip); }
+
+#controls { left: 16px; bottom: 16px; display: flex; flex-direction: column; overflow: hidden; }
+#controls button {
+  width: 28px; height: 28px; display: grid; place-items: center;
+  border: 0; border-bottom: 1px solid var(--panel-b);
+  background: var(--panel); color: var(--text); cursor: pointer;
+}
+#controls button:last-child { border-bottom: 0; }
+#controls button:hover { background: var(--chip); }
+
+#minimap { right: 16px; bottom: 16px; width: 220px; height: 150px; overflow: hidden; cursor: pointer; }
+#minimap svg { width: 100%; height: 100%; display: block; }
+#minimap .mn { fill: var(--mini-node); }
+#minimap .mg { fill: none; stroke: var(--mini-node); stroke-dasharray: 6 6; stroke-width: 3; }
+#minimap .mask { fill: var(--mask); fill-rule: evenodd; }
+
+#attrib { position: absolute; right: 16px; bottom: 172px; font-size: 10px; color: var(--muted); z-index: 10; }
+
+@media (max-width: 760px) {
+  #title { right: 16px; }
+  #title p { display: none; }
+  #tabs { flex-wrap: nowrap; overflow-x: auto; }
+  #steps { top: auto; bottom: 16px; left: 16px; right: 16px; width: auto; max-height: 40%; }
+  #minimap, #attrib { display: none; }
+  #controls { bottom: calc(40% + 28px); }
+}
+</style>
+</head>
+<body>
+<div id="flow" aria-label="Authentication flow diagram">
+  <div id="vp">
+    <div id="groups"></div>
+    <svg class="layer" id="edges">
+      <defs>
+        <marker id="m-def" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z" fill="var(--edge)"/></marker>
+        <marker id="m-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z" fill="var(--edge-dim)"/></marker>
+        <marker id="m-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z" fill="var(--flow)"/></marker>
+        <marker id="m-hl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z" fill="var(--sel)"/></marker>
+      </defs>
+    </svg>
+    <div id="nodes"></div>
+    <svg class="layer" id="over">
+      <g id="labels"></g>
+      <g id="handles"></g>
+      <circle id="dotRing" r="10" visibility="hidden"/>
+      <circle id="dot" r="5" visibility="hidden"/>
+    </svg>
+  </div>
+
+  <div class="panel" id="title">
+    <h1>Inventory API · auth flows</h1>
+    <p>Kong Gateway 3.16 on Konnect · Auth0 OIDC · Django REST Framework</p>
+    <div id="tabs" role="tablist"></div>
+  </div>
+
+  <aside class="panel" id="steps">
+    <header><h2 id="sTitle"></h2><p id="sDesc"></p></header>
+    <ol id="list"></ol>
+    <footer id="sFoot">
+      <button class="btn" id="prev" aria-label="Previous step">‹</button>
+      <button class="btn" id="play" aria-label="Play">▶ Play</button>
+      <button class="btn" id="next" aria-label="Next step">›</button>
+      <span class="count" id="count"></span>
+    </footer>
+  </aside>
+
+  <div class="panel" id="controls">
+    <button id="zin" aria-label="Zoom in"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button id="zout" aria-label="Zoom out"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+    <button id="fit" aria-label="Fit view"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+    <button id="theme" aria-label="Toggle theme"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="panel" id="minimap"><svg id="mini"></svg></div>
+  <div id="attrib">drag nodes · scroll to zoom · ←/→ steps</div>
+</div>
+
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const NS = 'http://www.w3.org/2000/svg';
+
+// ---------------------------------------------------------------- data
+const ICONS = {
+  browser: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M6.5 6.5h.01M9 6.5h.01"/>',
+  terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 10l3 2.5L7 15M12.5 15H17"/>',
+  sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7z"/>',
+  shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  cpu: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
+  gateway: '<path d="M4 12h16M14 6l6 6-6 6"/><circle cx="5" cy="12" r="2"/>',
+  lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L20 3M16 7l3 3"/>',
+  file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h4"/>',
+  cloud: '<path d="M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.1 11.5 3.3 3.3 0 0 0 7 18z"/>',
+  db: '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>',
+};
+
+const NODES = [
+  { id: 'browser', x: 40, y: 170, w: 210, icon: 'browser', title: 'Browser', sub: 'DRF browsable API',
+    rows: [{ k: 'cookie', v: 'inventory_session' }] },
+  { id: 'app', x: 40, y: 430, w: 210, icon: 'terminal', title: 'curl / app', sub: 'Auth0 M2M client',
+    rows: [{ k: 'Bearer', v: 'Auth0 JWT' }, { k: 'Basic', v: 'client id:secret' }, { k: 'apikey', v: 'test' }] },
+  { id: 'mcp', x: 40, y: 720, w: 210, icon: 'sparkle', title: 'MCP client', sub: 'Claude Code',
+    rows: [{ k: 'apikey', v: 'test' }] },
+  { id: 'auth0', x: 340, y: -10, w: 250, icon: 'shield', tint: '#eb5424', title: 'Auth0', sub: '<tenant>.us.auth0.com',
+    rows: [{ k: 'Web App', v: 'auth code + PKCE' }, { k: 'M2M App', v: 'client_credentials' },
+           { k: 'API', v: 'audience · RS256' }, { k: '.well-known', v: 'discovery · JWKS' }] },
+  { id: 'aigw', x: 360, y: 720, w: 240, icon: 'cpu', title: 'Kong AI Gateway 2.2', sub: ':11443 /mcp/inventory',
+    chips: ['ai-mcp-proxy', 'conversion-listener'] },
+  { id: 'kong', group: true, x: 690, y: 130, icon: 'gateway', title: 'Kong Gateway 3.16', sub: 'data plane · https://localhost:8443' },
+  { id: 'oidc', parent: 'kong', w: 300, icon: 'lock', tint: '#6366f1', mono: true, title: '/oidc/inventory', sub: 'django-route-items-oidc',
+    chips: ['openid-connect', 'datakit'],
+    rows: [{ k: 'browser', v: 'authorization_code · session' }, { k: 'apps', v: 'bearer · client_credentials' },
+           { k: 'session', v: 'idle 15m · roll 1h · abs 8h' }, { k: 'ssl_verify', v: 'true' }] },
+  { id: 'key', parent: 'kong', w: 300, icon: 'key', tint: '#ec4899', mono: true, title: '/inventory', sub: 'django-route-items',
+    chips: ['key-auth', 'datakit'], rows: [{ k: 'consumer', v: 'user1' }] },
+  { id: 'static', parent: 'kong', w: 300, icon: 'file', mono: true, title: '/static', sub: 'django-route-static',
+    chips: ['no auth · GET/HEAD'] },
+  { id: 'cp', x: 1140, y: -10, w: 240, icon: 'cloud', title: 'Konnect', sub: 'control plane · django-apigw',
+    rows: [{ k: 'decK', v: 'kong/kong.yaml' }] },
+  { id: 'django', x: 1140, y: 270, w: 260, icon: 'db', tint: '#0c4b33', title: 'Django + DRF', sub: 'gunicorn · :3333',
+    rows: [{ id: 'api', k: '/api/items/', v: 'Basic auth' }, { id: 'hdr', k: 'X-Authenticated-*', v: 'OIDC identity' },
+           { id: 'st', k: '/static/', v: 'whitenoise' }] },
+];
+
+// s/t = node ids; sh/th = handle side (l r t b) + fraction along it, or a row id
+const EDGES = [
+  { id: 'b_oidc', s: 'browser', sh: { s: 'r', f: .42 }, t: 'oidc', th: { s: 'l', f: .28 }, label: 'HTTPS · session cookie', lt: .45 },
+  { id: 'b_auth0', s: 'browser', sh: { s: 't', f: .6 }, t: 'auth0', th: { s: 'l', f: .5 }, label: 'login redirect', lt: .5 },
+  { id: 'b_static', s: 'browser', sh: { s: 'r', f: .78 }, t: 'static', th: { s: 'l', f: .5 }, label: 'CSS · JS', lt: .78 },
+  { id: 'app_auth0', s: 'app', sh: { s: 'r', f: .18 }, t: 'auth0', th: { s: 'b', f: .3 }, label: '/oauth/token', lt: .55 },
+  { id: 'app_oidc', s: 'app', sh: { s: 'r', f: .4 }, t: 'oidc', th: { s: 'l', f: .7 }, label: 'Bearer · Basic id:secret', lt: .45 },
+  { id: 'app_key', s: 'app', sh: { s: 'r', f: .75 }, t: 'key', th: { s: 'l', f: .4 }, label: 'apikey', lt: .3 },
+  { id: 'mcp_aigw', s: 'mcp', sh: { s: 'r', f: .5 }, t: 'aigw', th: { s: 'l', f: .5 }, label: 'MCP · apikey', lt: .5 },
+  { id: 'aigw_key', s: 'aigw', sh: { s: 'r', f: .45 }, t: 'key', th: { s: 'l', f: .75 }, label: 'REST · apikey', lt: .55 },
+  { id: 'oidc_auth0', s: 'oidc', sh: { s: 't', f: .8 }, t: 'auth0', th: { s: 'r', f: .55 }, label: 'code → token · JWKS', lt: .55 },
+  { id: 'oidc_django', s: 'oidc', sh: { s: 'r', f: .5 }, t: 'django', th: { s: 'l', row: 'hdr' }, label: 'Basic · X-Authenticated-*', lt: .5 },
+  { id: 'key_django', s: 'key', sh: { s: 'r', f: .5 }, t: 'django', th: { s: 'l', row: 'api' }, label: 'Basic', lt: .5 },
+  { id: 'static_django', s: 'static', sh: { s: 'r', f: .5 }, t: 'django', th: { s: 'l', row: 'st' }, label: 'whitenoise', lt: .5 },
+  { id: 'cp_kong', s: 'cp', sh: { s: 'l', f: .5 }, t: 'kong', th: { s: 't', f: .88 }, label: 'config · deck sync', lt: .45, cfg: true },
+];
+
+// d: 1 = request along the edge, -1 = response back
+const FLOWS = {
+  browser: {
+    name: 'Browser · OIDC session', color: '#6366f1',
+    desc: 'Authorization code + PKCE with Auth0, then a Kong-side encrypted session cookie.',
+    steps: [
+      { e: 'b_oidc', d: 1, t: 'Request without a session', c: 'GET /oidc/inventory/ — no inventory_session cookie' },
+      { e: 'b_oidc', d: -1, t: 'Kong redirects to Auth0', c: '302 → /authorize?response_type=code&code_challenge=…&audience=…&state=…' },
+      { e: 'b_auth0', d: 1, t: 'User signs in', c: 'Auth0 Universal Login · web app has User Access to the API' },
+      { e: 'b_auth0', d: -1, t: 'Auth0 returns the code', c: '302 → https://localhost:8443/oidc/inventory/?code=…&state=…' },
+      { e: 'b_oidc', d: 1, t: 'Callback reaches Kong', c: 'openid-connect checks state + PKCE verifier' },
+      { e: 'oidc_auth0', d: 1, t: 'Code exchanged for tokens', c: 'POST /oauth/token (client_secret_post) · verified via JWKS · aud required' },
+      { e: 'b_oidc', d: -1, t: 'Session cookie issued', c: '302 to original URL · Set-Cookie: inventory_session; Secure; HttpOnly; SameSite=Lax' },
+      { e: 'b_oidc', d: 1, t: 'Authenticated by session', c: 'cookie only from now on · idle 15 min · rolling 1 h · absolute 8 h' },
+      { e: 'oidc_django', d: 1, t: 'Proxied to Django', c: 'DataKit → Authorization: Basic user1 · X-Authenticated-User / -Email' },
+      { e: 'b_static', d: 1, t: 'Page assets', c: 'GET /static/rest_framework/… — public route, no auth' },
+      { e: 'static_django', d: 1, t: 'Served by whitenoise', c: 'Kong /static → Django :3333/static' },
+      { e: 'b_oidc', d: 1, t: 'Logout', c: 'GET /oidc/inventory/logout → Kong drops the session' },
+      { e: 'b_auth0', d: 1, t: 'IdP session ended', c: 'Auth0 end_session → back to logout_redirect_uri' },
+    ],
+  },
+  bearer: {
+    name: 'App · Bearer JWT', color: '#10b981',
+    desc: 'The app gets its own access token from Auth0 and sends it to Kong.',
+    steps: [
+      { e: 'app_auth0', d: 1, t: 'Request a token', c: 'POST /oauth/token · grant_type=client_credentials · audience=<API identifier>' },
+      { e: 'app_auth0', d: -1, t: 'JWT access token', c: 'RS256 · aud = API identifier · expires_in 86400' },
+      { e: 'app_oidc', d: 1, t: 'Call the API', c: 'Authorization: Bearer <JWT>' },
+      { e: 'oidc_auth0', d: 1, t: 'Verify locally', c: 'JWKS (cached) → signature, iss, exp, aud · no per-request call to Auth0' },
+      { e: 'oidc_django', d: 1, t: 'Proxied to Django', c: 'DataKit Basic auth · X-Authenticated-User = <client-id>@clients' },
+      { e: 'app_oidc', d: -1, t: 'Response', c: '200 application/json' },
+    ],
+  },
+  cc: {
+    name: 'App · client_credentials', color: '#f59e0b',
+    desc: 'The app sends its client id/secret to Kong; Kong fetches and caches the token.',
+    steps: [
+      { e: 'app_oidc', d: 1, t: 'Send client credentials', c: 'Authorization: Basic base64(m2m_client_id:secret)' },
+      { e: 'oidc_auth0', d: 1, t: 'Kong requests a token', c: 'POST /oauth/token · client_credentials · audience via token_post_args' },
+      { e: 'oidc_auth0', d: -1, t: 'Token cached', c: 'access_token kept in Kong cache (cache_tokens, salted)' },
+      { e: 'oidc_django', d: 1, t: 'Proxied to Django', c: 'DataKit Basic auth → /api/items/' },
+      { e: 'app_oidc', d: -1, t: 'Response', c: '200 application/json' },
+    ],
+  },
+  apikey: {
+    name: 'apikey · MCP', color: '#ec4899',
+    desc: 'The original key-auth route. Kong AI Gateway uses it as the MCP upstream.',
+    steps: [
+      { e: 'app_key', d: 1, t: 'Direct apikey call', c: "curl -H 'apikey: test' https://localhost:8443/inventory/" },
+      { e: 'mcp_aigw', d: 1, t: 'MCP tool call', c: 'JSON-RPC tools/call · apikey header · /mcp/inventory' },
+      { e: 'aigw_key', d: 1, t: 'Tool → REST', c: 'https://host.docker.internal:8443/inventory/… · apikey forwarded · private CA' },
+      { e: 'key_django', d: 1, t: 'key-auth + DataKit', c: 'consumer user1 · Authorization: Basic → /api/items/' },
+      { e: 'aigw_key', d: -1, t: 'REST response', c: 'JSON from Django' },
+      { e: 'mcp_aigw', d: -1, t: 'MCP result', c: 'tools/call result returned to the client' },
+    ],
+  },
+  all: { name: 'All', color: '#71717a', desc: 'Every route on one canvas. Pick a flow to step through it.' },
+};
+const ORDER = ['browser', 'bearer', 'cc', 'apikey', 'all'];
+
+const byId = Object.fromEntries(NODES.map(n => [n.id, n]));
+const E = Object.fromEntries(EDGES.map(e => [e.id, e]));
+const state = { x: 0, y: 0, z: 1, flow: 'browser', step: 0, playing: false, sel: null, t0: performance.now() };
+
+// ---------------------------------------------------------------- nodes
+const icon = n => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${ICONS[n]}</svg>`;
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+function nodeHTML(n) {
+  let h = `<div class="hd"><div class="ic"${n.tint ? ` style="color:${n.tint}"` : ''}>${icon(n.icon)}</div>
+    <div><div class="ti${n.mono ? ' mono' : ''}">${esc(n.title)}</div><div class="su">${esc(n.sub)}</div></div></div>`;
+  let b = '';
+  if (n.chips) b += `<div class="chips">${n.chips.map(c => `<span class="chip">${esc(c)}</span>`).join('')}</div>`;
+  if (n.rows) b += n.rows.map(r => `<div class="row"${r.id ? ` data-row="${r.id}"` : ''}><code>${esc(r.k)}</code><span>${esc(r.v)}</span></div>`).join('');
+  return b && !n.group ? h + `<div class="body">${b}</div>` : h;
+}
+
+for (const n of NODES) {
+  const el = document.createElement('div');
+  el.className = 'node' + (n.group ? ' group' : '');
+  el.dataset.id = n.id;
+  if (n.w) el.style.width = n.w + 'px';
+  el.innerHTML = nodeHTML(n);
+  (n.group ? $('#groups') : $('#nodes')).appendChild(el);
+  n.el = el;
+}
+// stack each group's children and size the group around them
+function measure() {
+  for (const n of NODES) if (!n.group) { n.w = n.el.offsetWidth; n.h = n.el.offsetHeight; }
+  for (const g of NODES.filter(n => n.group)) {
+    const kids = NODES.filter(n => n.parent === g.id);
+    let y = 64, w = 0;
+    for (const k of kids) { k.x = 20; k.y = y; y += k.h + 34; w = Math.max(w, k.w); }
+    g.w = w + 40; g.h = y - 34 + 20;
+    g.el.style.width = g.w + 'px'; g.el.style.height = g.h + 'px';
+  }
+}
+measure();
+
+function abs(n) {
+  if (!n.parent) return { x: n.x, y: n.y };
+  const p = abs(byId[n.parent]);
+  return { x: p.x + n.x, y: p.y + n.y };
+}
+function placeNodes() {
+  for (const n of NODES) { const a = abs(n); n.el.style.transform = `translate(${a.x}px,${a.y}px)`; }
+}
+
+// ---------------------------------------------------------------- edges (React Flow bezier)
+function handlePos(id, h) {
+  const n = byId[id], a = abs(n);
+  let f = h.f ?? .5;
+  if (h.row) { const r = n.el.querySelector(`[data-row="${h.row}"]`); f = (r.offsetTop + r.offsetHeight / 2) / n.h; }
+  switch (h.s) {
+    case 'l': return [a.x, a.y + n.h * f];
+    case 'r': return [a.x + n.w, a.y + n.h * f];
+    case 't': return [a.x + n.w * f, a.y];
+    default: return [a.x + n.w * f, a.y + n.h];
+  }
+}
+const off = d => d >= 0 ? .5 * d : 6.25 * Math.sqrt(-d);
+function ctrl(side, [x1, y1], [x2, y2]) {
+  switch (side) {
+    case 'l': return [x1 - off(x1 - x2), y1];
+    case 'r': return [x1 + off(x2 - x1), y1];
+    case 't': return [x1, y1 - off(y1 - y2)];
+    default: return [x1, y1 + off(y2 - y1)];
+  }
+}
+function bez(p0, p1, p2, p3, t) {
+  const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+  return [a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0], a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1]];
+}
+
+const edgesSvg = $('#edges'), labelsG = $('#labels'), handlesG = $('#handles');
+for (const e of EDGES) {
+  e.path = document.createElementNS(NS, 'path');
+  e.path.setAttribute('class', 'edge' + (e.cfg ? ' cfg' : ''));
+  edgesSvg.appendChild(e.path);
+  e.lg = document.createElementNS(NS, 'g');
+  e.lg.setAttribute('class', 'elabel');
+  const r = document.createElementNS(NS, 'rect'), t = document.createElementNS(NS, 'text');
+  t.textContent = e.label; t.setAttribute('dominant-baseline', 'central'); t.setAttribute('text-anchor', 'middle');
+  r.setAttribute('rx', 4); e.lg.append(r, t); labelsG.appendChild(e.lg);
+  e.rect = r; e.text = t;
+}
+function sizeLabels() {
+  for (const e of EDGES) {
+    e.lw = e.text.getBBox().width + 12; e.lh = 18;
+    e.rect.setAttribute('width', e.lw); e.rect.setAttribute('height', e.lh);
+    e.rect.setAttribute('x', -e.lw / 2); e.rect.setAttribute('y', -e.lh / 2);
+  }
+}
+sizeLabels();
+
+function layoutEdges() {
+  handlesG.innerHTML = '';
+  const seen = new Set();
+  for (const e of EDGES) {
+    const s = handlePos(e.s, e.sh), t = handlePos(e.t, e.th);
+    const c1 = ctrl(e.sh.s, s, t), c2 = ctrl(e.th.s, t, s);
+    e.path.setAttribute('d', `M${s} C${c1} ${c2} ${t}`);
+    const [lx, ly] = bez(s, c1, c2, t, e.lt);
+    e.lg.setAttribute('transform', `translate(${lx},${ly})`);
+    for (const p of [s, t]) {
+      const k = p.map(v => v.toFixed(1)).join();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const c = document.createElementNS(NS, 'circle');
+      c.setAttribute('class', 'handle'); c.setAttribute('cx', p[0]); c.setAttribute('cy', p[1]); c.setAttribute('r', 3.5);
+      handlesG.appendChild(c);
+    }
+  }
+}
+
+// ---------------------------------------------------------------- flow state
+function applyFlow() {
+  const f = FLOWS[state.flow];
+  document.documentElement.style.setProperty('--flow', f.color);
+  const inE = new Set((f.steps || []).map(s => s.e));
+  const inN = new Set();
+  inE.forEach(id => { inN.add(E[id].s); inN.add(E[id].t); });
+  for (const id of [...inN]) if (byId[id].parent) inN.add(byId[id].parent);
+  const cur = f.steps ? f.steps[state.step] : null;
+
+  for (const e of EDGES) {
+    const isIn = inE.has(e.id), dim = !!f.steps && !isIn, isCur = cur && cur.e === e.id;
+    const hl = !f.steps && state.sel && (e.s === state.sel || e.t === state.sel);
+    e.path.classList.toggle('in', isIn);
+    e.path.classList.toggle('dim', dim);
+    e.path.classList.toggle('cur', !!isCur);
+    e.path.classList.toggle('hl', !!hl);
+    e.path.setAttribute('marker-end', `url(#m-${isIn ? 'flow' : dim ? 'dim' : hl ? 'hl' : 'def'})`);
+    e.lg.classList.toggle('dim', dim);
+    e.lg.classList.toggle('cur', !!isCur);
+  }
+  for (const n of NODES) {
+    n.el.classList.toggle('dim', !!f.steps && !inN.has(n.id));
+    n.el.classList.toggle('on', !!cur && !n.group && (E[cur.e].s === n.id || E[cur.e].t === n.id));
+    n.el.classList.toggle('sel', state.sel === n.id);
+  }
+  document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', b.dataset.f === state.flow));
+  renderSteps();
+  state.t0 = performance.now();
+}
+
+function renderSteps() {
+  const f = FLOWS[state.flow], list = $('#list');
+  $('#sTitle').innerHTML = `<span class="sw" style="background:${f.color}"></span>${esc(f.name)}`;
+  $('#sDesc').textContent = f.desc;
+  list.innerHTML = '';
+  if (!f.steps) {
+    list.className = 'legend';
+    for (const k of ORDER.slice(0, -1)) {
+      const g = FLOWS[k], li = document.createElement('li');
+      li.innerHTML = `<span class="sw" style="background:${g.color}"></span><div><b>${esc(g.name)}</b><code>${esc(g.desc)}</code></div>`;
+      li.onclick = () => setFlow(k);
+      list.appendChild(li);
+    }
+    $('#sFoot').style.display = 'none';
+    return;
+  }
+  list.className = '';
+  $('#sFoot').style.display = '';
+  f.steps.forEach((s, i) => {
+    const li = document.createElement('li');
+    li.className = i === state.step ? 'cur' : i < state.step ? 'done' : '';
+    li.innerHTML = `<span class="n">${i + 1}</span><div><b>${esc(s.t)}<span class="dir">${s.d < 0 ? '← response' : ''}</span></b><code>${esc(s.c)}</code></div>`;
+    li.onclick = () => { stop(); setStep(i); };
+    list.appendChild(li);
+  });
+  list.children[state.step]?.scrollIntoView({ block: 'nearest' });
+  $('#count').textContent = `${state.step + 1} / ${f.steps.length}`;
+}
+
+function setFlow(k) { stop(); state.flow = k; state.step = 0; state.sel = null; applyFlow(); }
+function setStep(i) {
+  const n = FLOWS[state.flow].steps?.length;
+  if (!n) return;
+  state.step = (i + n) % n;
+  applyFlow();
+}
+let timer = null;
+function play() {
+  state.playing = true; $('#play').textContent = '❚❚ Pause';
+  timer = setInterval(() => setStep(state.step + 1), 2200);
+}
+function stop() { state.playing = false; clearInterval(timer); $('#play').textContent = '▶ Play'; }
+
+const tabs = $('#tabs');
+for (const k of ORDER) {
+  const b = document.createElement('button');
+  b.className = 'tab'; b.dataset.f = k; b.setAttribute('role', 'tab');
+  b.innerHTML = `<span class="sw" style="background:${FLOWS[k].color}"></span>${esc(FLOWS[k].name)}`;
+  b.onclick = () => setFlow(k);
+  tabs.appendChild(b);
+}
+$('#prev').onclick = () => { stop(); setStep(state.step - 1); };
+$('#next').onclick = () => { stop(); setStep(state.step + 1); };
+$('#play').onclick = () => state.playing ? stop() : play();
+addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight') { stop(); setStep(state.step + 1); }
+  if (e.key === 'ArrowLeft') { stop(); setStep(state.step - 1); }
+  if (e.key === ' ' && FLOWS[state.flow].steps) { e.preventDefault(); state.playing ? stop() : play(); }
+});
+
+// moving packet along the current step's edge
+const dot = $('#dot'), ring = $('#dotRing');
+function tick(now) {
+  const f = FLOWS[state.flow], cur = f.steps && f.steps[state.step];
+  if (cur) {
+    const p = E[cur.e].path, len = p.getTotalLength();
+    let t = ((now - state.t0) % 1500) / 1500;
+    t = t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    const pt = p.getPointAtLength(len * (cur.d > 0 ? t : 1 - t));
+    for (const c of [dot, ring]) { c.setAttribute('cx', pt.x); c.setAttribute('cy', pt.y); c.setAttribute('visibility', 'visible'); }
+  } else {
+    dot.setAttribute('visibility', 'hidden'); ring.setAttribute('visibility', 'hidden');
+  }
+  requestAnimationFrame(tick);
+}
+
+// ---------------------------------------------------------------- viewport
+const flow = $('#flow'), vp = $('#vp');
+function applyView() {
+  vp.style.transform = `translate(${state.x}px,${state.y}px) scale(${state.z})`;
+  flow.style.backgroundSize = `${20 * state.z}px ${20 * state.z}px`;
+  flow.style.backgroundPosition = `${state.x}px ${state.y}px`;
+  drawMini();
+}
+function bounds() {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const n of NODES) { const a = abs(n); x0 = Math.min(x0, a.x); y0 = Math.min(y0, a.y); x1 = Math.max(x1, a.x + n.w); y1 = Math.max(y1, a.y + n.h); }
+  return { x0, y0, x1, y1 };
+}
+function fit() {
+  const b = bounds(), W = innerWidth, H = innerHeight, mobile = W <= 760;
+  const L = 16, T = $('#title').offsetHeight + 28;
+  const R = mobile ? W - 16 : W - $('#steps').offsetWidth - 32;
+  const B = mobile ? H - $('#steps').offsetHeight - 28 : H - 16;
+  const aw = R - L, ah = B - T, bw = b.x1 - b.x0, bh = b.y1 - b.y0;
+  const z = Math.max(.2, Math.min(1.1, Math.min(aw / bw, ah / bh) * .96));
+  state.z = z;
+  state.x = L + (aw - bw * z) / 2 - b.x0 * z;
+  state.y = T + (ah - bh * z) / 2 - b.y0 * z;
+  applyView();
+}
+function zoomAt(k, cx, cy) {
+  const nz = Math.max(.2, Math.min(2.2, state.z * k));
+  state.x = cx - (cx - state.x) * (nz / state.z);
+  state.y = cy - (cy - state.y) * (nz / state.z);
+  state.z = nz;
+  applyView();
+}
+flow.addEventListener('wheel', e => {
+  if (e.target.closest('.panel')) return;
+  e.preventDefault();
+  zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? .01 : .0015)), e.clientX, e.clientY);
+}, { passive: false });
+$('#zin').onclick = () => zoomAt(1.2, innerWidth / 2, innerHeight / 2);
+$('#zout').onclick = () => zoomAt(1 / 1.2, innerWidth / 2, innerHeight / 2);
+$('#fit').onclick = fit;
+$('#theme').onclick = () => {
+  const r = document.documentElement;
+  const dark = r.dataset.theme ? r.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  r.dataset.theme = dark ? 'light' : 'dark';
+};
+
+// pan the canvas or drag a node
+let drag = null;
+flow.addEventListener('pointerdown', e => {
+  if (e.target.closest('.panel') || e.button > 0) return;
+  const nodeEl = e.target.closest('.node');
+  drag = { px: e.clientX, py: e.clientY, sx: e.clientX, sy: e.clientY, node: nodeEl ? byId[nodeEl.dataset.id] : null };
+  if (drag.node) nodeEl.classList.add('dragging'); else flow.classList.add('panning');
+  flow.setPointerCapture(e.pointerId);
+});
+flow.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.px, dy = e.clientY - drag.py;
+  drag.px = e.clientX; drag.py = e.clientY;
+  if (drag.node) {
+    drag.node.x += dx / state.z; drag.node.y += dy / state.z;
+    placeNodes(); layoutEdges(); drawMini();
+  } else {
+    state.x += dx; state.y += dy; applyView();
+  }
+});
+flow.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const moved = Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 3;
+  if (!moved) {
+    state.sel = drag.node && state.sel !== drag.node.id ? drag.node.id : null;
+    if (state.sel && FLOWS[state.flow].steps) { stop(); state.flow = 'all'; }
+    applyFlow();
+  }
+  drag.node?.el.classList.remove('dragging');
+  flow.classList.remove('panning');
+  drag = null;
+});
+
+// ---------------------------------------------------------------- minimap
+const mini = $('#mini');
+function drawMini() {
+  if ($('#minimap').offsetParent === null) return;
+  const b = bounds(), pad = 80;
+  const W = innerWidth, H = innerHeight;
+  const vx = -state.x / state.z, vy = -state.y / state.z, vw = W / state.z, vh = H / state.z;
+  const x0 = Math.min(b.x0 - pad, vx), y0 = Math.min(b.y0 - pad, vy);
+  const x1 = Math.max(b.x1 + pad, vx + vw), y1 = Math.max(b.y1 + pad, vy + vh);
+  mini.setAttribute('viewBox', `${x0} ${y0} ${x1 - x0} ${y1 - y0}`);
+  mini.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  let s = '';
+  for (const n of NODES) {
+    const a = abs(n);
+    s += `<rect class="${n.group ? 'mg' : 'mn'}" x="${a.x}" y="${a.y}" width="${n.w}" height="${n.h}" rx="${n.group ? 14 : 8}"/>`;
+  }
+  const big = 1e5;
+  s += `<path class="mask" d="M${x0 - big},${y0 - big}h${x1 - x0 + 2 * big}v${y1 - y0 + 2 * big}h${-(x1 - x0 + 2 * big)}z M${vx},${vy}h${vw}v${vh}h${-vw}z"/>`;
+  mini.innerHTML = s;
+}
+let miniDrag = false;
+function miniPan(e) {
+  const pt = mini.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+  const w = pt.matrixTransform(mini.getScreenCTM().inverse());
+  state.x = innerWidth / 2 - w.x * state.z;
+  state.y = innerHeight / 2 - w.y * state.z;
+  applyView();
+}
+$('#minimap').addEventListener('pointerdown', e => { miniDrag = true; e.currentTarget.setPointerCapture(e.pointerId); miniPan(e); });
+$('#minimap').addEventListener('pointermove', e => miniDrag && miniPan(e));
+$('#minimap').addEventListener('pointerup', () => miniDrag = false);
+
+// ---------------------------------------------------------------- init
+placeNodes();
+layoutEdges();
+applyFlow();
+fit();
+addEventListener('resize', fit);
+requestAnimationFrame(tick);
+// re-measure once web fonts are in, since node sizes depend on them
+document.fonts?.ready.then(() => { measure(); sizeLabels(); placeNodes(); layoutEdges(); fit(); });
+})();
+</script>
+</body>
+</html>

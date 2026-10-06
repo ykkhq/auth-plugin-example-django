@@ -1,0 +1,9 @@
+HTTP/2 200 
+date: Thu, 01 Oct 2026 23:42:09 GMT
+content-type: text/event-stream
+mcp-session-id: 7f446962-e049-45fd-8f5f-9b58d9916552
+cache-control: no-store, no-transform
+x-kong-response-latency: 2
+server: kong/2.2.0-ai-gateway
+x-kong-request-id: 21bd8807faf34e60cc07232b0f149069
+

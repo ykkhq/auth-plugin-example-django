@@ -8,3 +8,10 @@ cookie.txt
 cookies.txt
 *.log
 .env
+
+# AI Gateway DP client cert/key
+kong/ai-certs/
+kong/tls/
+
+# Auth0 / OIDC secrets (template: kong/auth0.env.example)
+kong/auth0.env

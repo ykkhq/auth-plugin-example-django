@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventory Auth Flows</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --canvas: #ffffff;
+  --dot: #d9d9de;
+  --node: #ffffff;
+  --node-b: #e4e4e7;
+  --text: #18181b;
+  --muted: #71717a;
+  --edge: #b1b1b7;
+  --handle: #1a192b;
+  --chip: #f4f4f5;
+  --group: rgba(244, 244, 245, .7);
+  --group-b: #d4d4d8;
+  --ok: #16a34a;
+  --err: #dc2626;
+  --warn: #d97706;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .05), 0 2px 6px rgba(0, 0, 0, .05);
+  --c-browser: #6366f1;
+  --c-bearer: #059669;
+  --c-cc: #d97706;
+  --c-key: #db2777;
+  --c-neutral: #52525b;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111113; --surface: #18181b; --canvas: #141416; --dot: #2c2c31; --node: #1e1e21;
+    --node-b: #35353b; --text: #f4f4f5; --muted: #a1a1aa; --edge: #5d5d66; --handle: #e4e4e7;
+    --chip: #27272a; --group: rgba(39, 39, 42, .5); --group-b: #3f3f46;
+    --ok: #22c55e; --err: #f87171; --warn: #fbbf24;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 2px 8px rgba(0, 0, 0, .3);
+    --c-browser: #818cf8; --c-bearer: #34d399; --c-cc: #fbbf24; --c-key: #f472b6; --c-neutral: #a1a1aa;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111113; --surface: #18181b; --canvas: #141416; --dot: #2c2c31; --node: #1e1e21;
+  --node-b: #35353b; --text: #f4f4f5; --muted: #a1a1aa; --edge: #5d5d66; --handle: #e4e4e7;
+  --chip: #27272a; --group: rgba(39, 39, 42, .5); --group-b: #3f3f46;
+  --ok: #22c55e; --err: #f87171; --warn: #fbbf24;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 2px 8px rgba(0, 0, 0, .3);
+  --c-browser: #818cf8; --c-bearer: #34d399; --c-cc: #fbbf24; --c-key: #f472b6; --c-neutral: #a1a1aa;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.6 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 1080px; margin: 0 auto; padding: 56px 16px 96px; }
+h1 { font-size: 30px; line-height: 1.2; letter-spacing: -.02em; margin: 0 0 10px; font-weight: 700; }
+h2 { font-size: 21px; letter-spacing: -.015em; margin: 64px 0 8px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+h3 { font-size: 15px; margin: 28px 0 6px; font-weight: 600; }
+p { margin: 8px 0; max-width: 760px; }
+.lede { font-size: 16.5px; color: var(--muted); max-width: 780px; }
+code { font-family: var(--mono); font-size: .86em; background: var(--chip); border: 1px solid var(--node-b); border-radius: 5px; padding: 0 5px; }
+pre { font-family: var(--mono); font-size: 12.5px; line-height: 1.55; background: var(--surface); border: 1px solid var(--node-b); border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 12px 0; }
+pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+.muted { color: var(--muted); }
+.sw { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 0; padding: 0; list-style: none; }
+.legend li { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; background: var(--surface); border: 1px solid var(--node-b); border-radius: 999px; padding: 4px 12px 4px 10px; }
+.legend a { color: inherit; text-decoration: none; }
+.toc { margin: 18px 0 0; font-size: 13.5px; color: var(--muted); }
+.toc a { color: var(--muted); }
+
+.diagram {
+  margin: 18px 0 10px;
+  background: var(--canvas);
+  border: 1px solid var(--node-b);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow-x: auto;
+}
+.diagram svg { display: block; width: 100%; height: auto; min-width: 760px; }
+.cap { font-size: 12.5px; color: var(--muted); margin: 6px 2px 0; }
+
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; margin: 14px 0; background: var(--surface); border: 1px solid var(--node-b); border-radius: 10px; overflow: hidden; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--node-b); vertical-align: top; }
+th { font-weight: 600; font-size: 12.5px; color: var(--muted); background: var(--chip); }
+tr:last-child td { border-bottom: 0; }
+.tablewrap { overflow-x: auto; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 14px 0; }
+.card { background: var(--surface); border: 1px solid var(--node-b); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
+.card b { display: block; font-size: 14px; margin-bottom: 4px; }
+.card p { font-size: 13.5px; margin: 0; color: var(--muted); }
+
+/* ---- SVG diagram parts (React Flow look) ---- */
+.dotp { fill: var(--dot); }
+.nb { fill: var(--node); stroke: var(--node-b); stroke-width: 1; }
+.gb { fill: var(--group); stroke: var(--group-b); stroke-dasharray: 5 4; }
+.nt { font: 600 12.5px Inter, system-ui, sans-serif; fill: var(--text); }
+.nt.mono { font: 500 12px var(--mono); }
+.ns { font: 400 10.5px var(--mono); fill: var(--muted); }
+.gt { font: 600 12.5px Inter, system-ui, sans-serif; fill: var(--text); }
+.e { fill: none; stroke: var(--edge); stroke-width: 1.5; }
+.e.acc { stroke: var(--acc); }
+.e.resp { stroke-dasharray: 5 4; }
+.e.err { stroke: var(--err); stroke-dasharray: 4 4; }
+.e.cfg { stroke-dasharray: 4 4; }
+.e.life { stroke: var(--node-b); stroke-dasharray: 3 5; stroke-width: 1.25; }
+.me { fill: var(--edge); } .ma { fill: var(--acc); } .mr { fill: var(--err); }
+.handle { fill: var(--handle); stroke: var(--node); stroke-width: 1.5; }
+.lp { fill: var(--node); stroke: var(--node-b); }
+.lt { font: 500 10.5px Inter, system-ui, sans-serif; fill: var(--text); }
+.lt.m { font: 400 10.5px var(--mono); }
+.lt.yes { fill: var(--ok); font-weight: 600; } .lt.no { fill: var(--err); font-weight: 600; }
+.badge { fill: var(--acc); }
+.badge-t { font: 700 9.5px Inter, system-ui, sans-serif; fill: #fff; }
+.note { fill: var(--node); stroke: var(--acc); stroke-width: 1; }
+.note-t { font: 400 10.5px var(--mono); fill: var(--text); }
+.sep { stroke: var(--group-b); stroke-dasharray: 6 5; }
+.sep-t { font: 600 10.5px Inter, system-ui, sans-serif; fill: var(--muted); letter-spacing: .06em; }
+.dec { fill: var(--warn); } .okd { fill: var(--ok); } .errd { fill: var(--err); }
+.accbar { fill: var(--acc); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Inventory API: how authentication works</h1>
+    <p class="lede">A Django REST inventory API sits behind <b>Kong Gateway 3.16</b> (managed by Konnect).
+      Kong handles all client authentication with plugins. Browsers sign in with <b>Auth0</b> and keep a Kong session cookie;
+      scripts and apps use OAuth2 tokens; the MCP server uses an API key. Django never sees any of it:
+      Kong always calls it with one Basic-auth service user.</p>
+    <ul class="legend">
+      <li><span class="sw" style="background:var(--c-browser)"></span><a href="#browser">Browser · OIDC + session</a></li>
+      <li><span class="sw" style="background:var(--c-bearer)"></span><a href="#bearer">App · Bearer JWT</a></li>
+      <li><span class="sw" style="background:var(--c-cc)"></span><a href="#cc">App · client_credentials via Kong</a></li>
+      <li><span class="sw" style="background:var(--c-key)"></span><a href="#mcp">apikey · MCP</a></li>
+    </ul>
+  </header>
+
+  <!-- ============================================================ -->
+  <h2 id="overview">1. The big picture</h2>
+  <p>Three routes on one Kong service. Each route has its own way of checking who the caller is; all of them end with
+    DataKit adding <code>Authorization: Basic user1</code> before the request reaches Django.</p>
+  <div class="diagram" id="d-arch"></div>
+  <p class="cap">Solid lines carry requests; the dashed line is configuration pushed from Konnect by <code>deck gateway sync</code>.</p>
+
+  <div class="tablewrap"><table>
+    <tr><th>Kong route</th><th>Plugins</th><th>Who uses it</th><th>Upstream</th></tr>
+    <tr><td><code>/oidc/inventory</code></td><td><code>openid-connect</code>, <code>datakit</code></td><td>Browsers (session cookie), apps (Bearer JWT or client_credentials)</td><td>Django <code>/api/items/</code></td></tr>
+    <tr><td><code>/inventory</code></td><td><code>key-auth</code>, <code>datakit</code></td><td>curl with <code>apikey</code>, Kong AI Gateway (MCP)</td><td>Django <code>/api/items/</code></td></tr>
+    <tr><td><code>/static</code></td><td>none (public, GET/HEAD)</td><td>Browsers loading DRF CSS / JS</td><td>Django <code>/static/</code> (whitenoise)</td></tr>
+  </table></div>
+
+  <!-- ============================================================ -->
+  <h2 id="decide">2. How the OIDC route decides what to do</h2>
+  <p>A single <code>openid-connect</code> plugin serves both browsers and machines because it is configured with four
+    <code>auth_methods</code>: <code>bearer</code>, <code>client_credentials</code>, <code>session</code> and
+    <code>authorization_code</code>. For each request it looks at what the client sent and picks the matching method.</p>
+  <div class="diagram" id="d-decide"></div>
+  <p class="cap">Simplified view of the plugin's method selection. A request with no credentials at all ends in a redirect to Auth0,
+    which is why an unauthenticated <code>curl</code> gets <code>302</code> rather than <code>401</code>.</p>
+
+  <!-- ============================================================ -->
+  <h2 id="browser"><span class="sw" style="background:var(--c-browser)"></span>3. Browser: OIDC login and session</h2>
+  <p>The browser never handles tokens. Kong runs the authorization-code flow (with PKCE) against Auth0, keeps the tokens
+    inside an encrypted cookie called <code>inventory_session</code>, and from then on only checks that cookie.</p>
+  <div class="diagram" id="d-browser"></div>
+
+  <h3>Session rules</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Setting</th><th>Value</th><th>Effect</th></tr>
+    <tr><td><code>session_idling_timeout</code></td><td>900 s</td><td>15 minutes without a request → log in again</td></tr>
+    <tr><td><code>session_rolling_timeout</code></td><td>3600 s</td><td>Cookie is re-issued at least every hour while in use</td></tr>
+    <tr><td><code>session_absolute_timeout</code></td><td>28800 s</td><td>After 8 hours a new login is required, active or not</td></tr>
+    <tr><td><code>session_cookie_*</code></td><td>Secure · HttpOnly · SameSite=Lax</td><td>Not readable by page JavaScript, only sent over HTTPS</td></tr>
+    <tr><td><code>logout_uri_suffix</code></td><td><code>/logout</code></td><td>Clears the Kong session and ends the Auth0 session (RP-initiated logout)</td></tr>
+  </table></div>
+  <p>The DRF page also loads CSS and JS from <code>/static/…</code>. Those requests go to the separate public
+    <code>/static</code> route, since they fall outside <code>/oidc/inventory</code>.</p>
+
+  <!-- ============================================================ -->
+  <h2 id="bearer"><span class="sw" style="background:var(--c-bearer)"></span>4. App: Bearer JWT</h2>
+  <p>The app gets its own access token from Auth0 (as the <em>Machine to Machine</em> application) and sends it on every call.
+    Kong verifies the JWT locally with Auth0's public keys, so Auth0 is not called per request.</p>
+  <div class="diagram" id="d-bearer"></div>
+<pre><code>TOKEN=$(curl -s https://$AUTH0_DOMAIN/oauth/token -H 'Content-Type: application/json' \
+  -d "{\"grant_type\":\"client_credentials\",\"client_id\":\"$AUTH0_M2M_CLIENT_ID\",
+       \"client_secret\":\"$AUTH0_M2M_CLIENT_SECRET\",\"audience\":\"$DECK_AUTH0_AUDIENCE\"}" | jq -r .access_token)
+
+curl -k https://localhost:8443/oidc/inventory/ -H "Authorization: Bearer $TOKEN"</code></pre>
+
+  <!-- ============================================================ -->
+  <h2 id="cc"><span class="sw" style="background:var(--c-cc)"></span>5. App: client_credentials through Kong</h2>
+  <p>The simplest option for scripts: send the M2M client id and secret to Kong as HTTP Basic. Kong performs the token
+    request itself (adding the <code>audience</code>), then caches the token for later calls.</p>
+  <div class="diagram" id="d-cc"></div>
+<pre><code>curl -k -u "$AUTH0_M2M_CLIENT_ID:$AUTH0_M2M_CLIENT_SECRET" https://localhost:8443/oidc/inventory/</code></pre>
+
+  <!-- ============================================================ -->
+  <h2 id="mcp"><span class="sw" style="background:var(--c-key)"></span>6. apikey and MCP</h2>
+  <p>The original route. Kong AI Gateway 2.2 publishes each item endpoint as an MCP tool and calls this route as its
+    upstream, forwarding the client's <code>apikey</code>. The same route also works for direct curl calls
+    (<code>curl -k https://localhost:8443/inventory/ -H "apikey: test"</code>).</p>
+  <div class="diagram" id="d-mcp"></div>
+
+  <!-- ============================================================ -->
+  <h2 id="config">7. Where things are configured</h2>
+  <div class="cards">
+    <div class="card"><b><code>kong/kong.yaml</code></b><p>decK state for control plane <code>django-apigw</code>: routes, OIDC, key-auth, DataKit, TLS cert.</p></div>
+    <div class="card"><b><code>kong/auth0.env</code></b><p>Auth0 issuer, client ids/secrets, audience, session secret. Gitignored; copy from <code>auth0.env.example</code>.</p></div>
+    <div class="card"><b><code>kong/ai-gateway.yaml</code></b><p>MCP server on Kong AI Gateway, applied with <code>kongctl</code>.</p></div>
+    <div class="card"><b>Auth0 dashboard</b><p>API (audience, RS256), Regular Web App, M2M App, RP-initiated logout.</p></div>
+  </div>
+
+  <h3>Things that bit us during setup</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr>
+    <tr><td><code>no Route matched</code> right after a sync</td><td>Data plane rejected the config: Kong 3.16 enforces TLS verification globally</td><td><code>ssl_verify: true</code> on the OIDC plugin</td></tr>
+    <tr><td><code>Client "…" is not authorized to access resource server "…"</code></td><td>Auth0 web app had no <em>User Access</em> to the API</td><td>API → Application Access → authorize the web app</td></tr>
+    <tr><td>DRF page loads without styling</td><td>Assets at <code>/static/…</code> had no Kong route</td><td>Public <code>/static</code> route to Django</td></tr>
+    <tr><td><code>curl</code> without credentials gets <code>302</code></td><td>Expected: <code>authorization_code</code> is enabled on the route</td><td>Send a Bearer token or Basic client credentials</td></tr>
+  </table></div>
+</main>
+
+<script>
+(() => {
+const NS = 'http://www.w3.org/2000/svg';
+let uid = 0;
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs || {}) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function text(parent, x, y, str, cls, anchor) {
+  const t = el('text', { x, y, class: cls, 'dominant-baseline': 'central' }, parent);
+  if (anchor) t.setAttribute('text-anchor', anchor);
+  t.textContent = str;
+  return t;
+}
+function canvas(host, w, h, acc) {
+  const id = 'd' + (uid++);
+  const svg = el('svg', { viewBox: `0 0 ${w} ${h}`, role: 'img' });
+  svg.style.setProperty('--acc', acc || 'var(--c-neutral)');
+  document.getElementById(host).appendChild(svg);
+  const defs = el('defs', {}, svg);
+  const p = el('pattern', { id: id + 'p', width: 20, height: 20, patternUnits: 'userSpaceOnUse' }, defs);
+  el('circle', { cx: 10, cy: 10, r: 1, class: 'dotp' }, p);
+  for (const [k, cls] of [['e', 'me'], ['a', 'ma'], ['r', 'mr']]) {
+    const m = el('marker', { id: `${id}m${k}`, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 10, markerHeight: 10,
+      markerUnits: 'userSpaceOnUse', orient: 'auto-start-reverse' }, defs);
+    el('path', { d: 'M0 1L9 5L0 9z', class: cls }, m);
+  }
+  el('rect', { x: 0, y: 0, width: w, height: h, fill: `url(#${id}p)` }, svg);
+  return { svg, id, edges: el('g', {}, svg), nodes: el('g', {}, svg), over: el('g', {}, svg) };
+}
+function pill(parent, cx, cy, str, cls, num) {
+  const g = el('g', {}, parent);
+  const r = el('rect', { class: 'lp', rx: 9, height: 18, y: cy - 9 }, g);
+  const t = text(g, 0, cy, str, 'lt ' + (cls || ''));
+  const tw = t.getComputedTextLength();
+  const pad = num ? 26 : 8, w = tw + pad + 8;
+  const x0 = cx - w / 2;
+  r.setAttribute('x', x0); r.setAttribute('width', w);
+  t.setAttribute('x', x0 + pad);
+  if (num) {
+    el('circle', { cx: x0 + 11, cy, r: 7, class: 'badge' }, g);
+    text(g, x0 + 11, cy + .5, String(num), 'badge-t', 'middle');
+  }
+  return g;
+}
+
+// ------------------------------------------------------------------ flowcharts
+const off = d => d >= 0 ? .5 * d : 6.25 * Math.sqrt(-d);
+function ctrl(side, [x1, y1], [x2, y2]) {
+  if (side === 'l') return [x1 - off(x1 - x2), y1];
+  if (side === 'r') return [x1 + off(x2 - x1), y1];
+  if (side === 't') return [x1, y1 - off(y1 - y2)];
+  return [x1, y1 + off(y2 - y1)];
+}
+function bez(p0, p1, p2, p3, t) {
+  const u = 1 - t;
+  return [0, 1].map(i => u * u * u * p0[i] + 3 * u * u * t * p1[i] + 3 * u * t * t * p2[i] + t * t * t * p3[i]);
+}
+function flowchart(host, spec) {
+  const c = canvas(host, spec.w, spec.h, spec.acc);
+  const N = {};
+  for (const n of spec.nodes) {
+    N[n.id] = n;
+    n.h = n.h || (n.sub ? 52 : 40);
+    if (n.group) {
+      el('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: 14, class: 'gb' }, c.nodes);
+      text(c.nodes, n.x + 16, n.y + 20, n.title, 'gt');
+      if (n.sub) text(c.nodes, n.x + 16, n.y + 37, n.sub, 'ns');
+      continue;
+    }
+    el('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: n.pill ? n.h / 2 : 10, class: 'nb',
+      filter: '' }, c.nodes);
+    let tx = n.x + 14;
+    const mark = { dec: 'dec', ok: 'okd', err: 'errd' }[n.kind];
+    if (n.kind === 'dec') {
+      const cx = n.x + 18, cy = n.y + n.h / 2;
+      el('path', { d: `M${cx} ${cy - 6}L${cx + 6} ${cy}L${cx} ${cy + 6}L${cx - 6} ${cy}z`, class: 'dec' }, c.nodes);
+      tx = n.x + 32;
+    } else if (mark) {
+      el('circle', { cx: n.x + 18, cy: n.y + n.h / 2, r: 4.5, class: mark }, c.nodes);
+      tx = n.x + 30;
+    } else if (n.acc) {
+      el('rect', { x: n.x, y: n.y + 10, width: 3, height: n.h - 20, rx: 1.5, fill: n.acc }, c.nodes);
+    }
+    if (n.pill) tx = n.x + (mark ? 30 : 18);
+    const anchor = n.center ? 'middle' : null;
+    if (n.center) tx = n.x + n.w / 2;
+    if (n.sub) {
+      text(c.nodes, tx, n.y + n.h / 2 - 8, n.title, 'nt' + (n.mono ? ' mono' : ''), anchor);
+      text(c.nodes, tx, n.y + n.h / 2 + 10, n.sub, 'ns', anchor);
+    } else {
+      text(c.nodes, tx, n.y + n.h / 2, n.title, 'nt' + (n.mono ? ' mono' : ''), anchor);
+    }
+  }
+  const pos = (n, h) => {
+    const f = h.f ?? .5;
+    if (h.s === 'l') return [n.x, n.y + n.h * f];
+    if (h.s === 'r') return [n.x + n.w, n.y + n.h * f];
+    if (h.s === 't') return [n.x + n.w * f, n.y];
+    return [n.x + n.w * f, n.y + n.h];
+  };
+  const seen = new Set();
+  for (const e of spec.edges) {
+    const s = pos(N[e.s], e.sh), t = pos(N[e.t], e.th);
+    const c1 = ctrl(e.sh.s, s, t), c2 = ctrl(e.th.s, t, s);
+    const kind = e.kind || 'acc';
+    const style = e.color ? ` style="stroke:${e.color}"` : '';
+    const path = el('path', { d: `M${s} C${c1} ${c2} ${t}`, class: 'e ' + kind,
+      'marker-end': `url(#${c.id}m${kind === 'err' ? 'r' : kind === 'acc' && !e.color ? 'a' : 'e'})` }, c.edges);
+    if (e.color) { path.style.stroke = e.color; path.setAttribute('marker-end', `url(#${c.id}m${e.mk || 'e'})`); }
+    if (e.label) {
+      const [lx, ly] = bez(s, c1, c2, t, e.lt ?? .5);
+      pill(c.over, lx, ly, e.label, e.lcls);
+    }
+    for (const p of [s, t]) {
+      const k = p.join();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      el('circle', { cx: p[0], cy: p[1], r: 3.5, class: 'handle' }, c.over);
+    }
+  }
+}
+
+// ------------------------------------------------------------------ step flow (sequence)
+function steps(host, spec) {
+  const W = 1000, top = 22, headH = 52, rowH = 44;
+  const lanes = spec.lanes.length, margin = 130;
+  const X = spec.lanes.map((_, i) => margin + i * (W - 2 * margin) / (lanes - 1));
+  let h = top + headH + 26;
+  for (const r of spec.rows) h += r.sep ? 40 : r.note ? 40 : rowH;
+  h += 24;
+  const c = canvas(host, W, h, spec.acc);
+  spec.lanes.forEach((l, i) => {
+    const w = 196, x = X[i] - w / 2;
+    el('line', { x1: X[i], y1: top + headH, x2: X[i], y2: h - 14, class: 'e life' }, c.edges);
+    el('rect', { x, y: top, width: w, height: headH, rx: 10, class: 'nb' }, c.nodes);
+    if (l.acc) el('rect', { x, y: top + 12, width: 3, height: headH - 24, rx: 1.5, fill: l.acc }, c.nodes);
+    text(c.nodes, X[i], top + 18, l.title, 'nt' + (l.mono ? ' mono' : ''), 'middle');
+    text(c.nodes, X[i], top + 36, l.sub, 'ns', 'middle');
+    el('circle', { cx: X[i], cy: top + headH, r: 3.5, class: 'handle' }, c.over);
+  });
+  let y = top + headH + 26, n = 0;
+  for (const r of spec.rows) {
+    if (r.sep) {
+      y += 20;
+      el('line', { x1: 24, y1: y, x2: W - 24, y2: y, class: 'sep' }, c.edges);
+      const g = el('g', {}, c.over);
+      const bg = el('rect', { y: y - 9, height: 18, rx: 9, class: 'lp' }, g);
+      const t = text(g, W / 2, y, r.sep.toUpperCase(), 'sep-t', 'middle');
+      const tw = t.getComputedTextLength() + 20;
+      bg.setAttribute('x', W / 2 - tw / 2); bg.setAttribute('width', tw);
+      y += 20;
+      continue;
+    }
+    if (r.note) {
+      y += 20;
+      const cx = X[r.at];
+      const g = el('g', {}, c.over);
+      const bg = el('rect', { y: y - 13, height: 26, rx: 7, class: 'note' }, g);
+      const t = text(g, cx, y, r.note, 'note-t', 'middle');
+      const tw = t.getComputedTextLength() + 24;
+      bg.setAttribute('x', cx - tw / 2); bg.setAttribute('width', tw);
+      y += 20;
+      continue;
+    }
+    y += rowH / 2;
+    n++;
+    const x1 = X[r.from], x2 = X[r.to], dir = Math.sign(x2 - x1);
+    el('line', { x1: x1 + dir * 5, y1: y, x2: x2 - dir * 5, y2: y,
+      class: 'e acc' + (r.resp ? ' resp' : ''), 'marker-end': `url(#${c.id}ma)` }, c.edges);
+    el('circle', { cx: x1, cy: y, r: 3.5, class: 'handle' }, c.over);
+    pill(c.over, (x1 + x2) / 2, y, r.label, 'm', n);
+    y += rowH / 2;
+  }
+}
+
+// ================================================================== diagrams
+const C = { b: 'var(--c-browser)', j: 'var(--c-bearer)', cc: 'var(--c-cc)', k: 'var(--c-key)' };
+
+flowchart('d-arch', {
+  w: 1180, h: 590,
+  nodes: [
+    { id: 'browser', x: 30, y: 90, w: 180, title: 'Browser', sub: 'DRF browsable API', acc: C.b },
+    { id: 'app', x: 30, y: 270, w: 180, title: 'curl / app', sub: 'Auth0 M2M client', acc: C.j },
+    { id: 'mcp', x: 30, y: 480, w: 180, title: 'MCP client', sub: 'Claude Code', acc: C.k },
+    { id: 'auth0', x: 300, y: 24, w: 210, title: 'Auth0', sub: 'OIDC provider · JWKS' },
+    { id: 'aigw', x: 300, y: 480, w: 210, title: 'Kong AI Gateway 2.2', sub: ':11443 /mcp/inventory' },
+    { id: 'kong', group: true, x: 580, y: 120, w: 300, h: 450, title: 'Kong Gateway 3.16', sub: 'https://localhost:8443' },
+    { id: 'oidc', x: 600, y: 180, w: 260, h: 60, title: '/oidc/inventory', sub: 'openid-connect · datakit', mono: true, acc: C.b },
+    { id: 'key', x: 600, y: 330, w: 260, h: 60, title: '/inventory', sub: 'key-auth · datakit', mono: true, acc: C.k },
+    { id: 'static', x: 600, y: 480, w: 260, h: 60, title: '/static', sub: 'public · GET/HEAD', mono: true },
+    { id: 'cp', x: 960, y: 24, w: 190, title: 'Konnect', sub: 'control plane django-apigw' },
+    { id: 'django', x: 960, y: 300, w: 190, h: 70, title: 'Django + DRF', sub: 'gunicorn :3333' },
+  ],
+  edges: [
+    { s: 'browser', sh: { s: 'r', f: .35 }, t: 'oidc', th: { s: 'l', f: .3 }, label: 'session cookie', lt: .5, color: C.b },
+    { s: 'browser', sh: { s: 't', f: .5 }, t: 'auth0', th: { s: 'l', f: .5 }, label: 'login', lt: .55, color: C.b },
+    { s: 'browser', sh: { s: 'r', f: .75 }, t: 'static', th: { s: 'l', f: .5 }, label: 'CSS · JS', lt: .82 },
+    { s: 'app', sh: { s: 'r', f: .3 }, t: 'oidc', th: { s: 'l', f: .7 }, label: 'Bearer · client creds', lt: .5, color: C.j },
+    { s: 'app', sh: { s: 't', f: .7 }, t: 'auth0', th: { s: 'b', f: .3 }, label: '/oauth/token', lt: .4, color: C.j },
+    { s: 'app', sh: { s: 'r', f: .75 }, t: 'key', th: { s: 'l', f: .35 }, label: 'apikey', lt: .3, color: C.k },
+    { s: 'mcp', sh: { s: 'r', f: .5 }, t: 'aigw', th: { s: 'l', f: .5 }, label: 'MCP · apikey', color: C.k },
+    { s: 'aigw', sh: { s: 'r', f: .35 }, t: 'key', th: { s: 'l', f: .7 }, label: 'REST · apikey', lt: .5, color: C.k },
+    { s: 'oidc', sh: { s: 't', f: .5 }, t: 'auth0', th: { s: 'r', f: .6 }, label: 'token · JWKS', lt: .5 },
+    { s: 'oidc', sh: { s: 'r', f: .5 }, t: 'django', th: { s: 'l', f: .25 }, label: 'Basic + X-Authenticated-*', lt: .45 },
+    { s: 'key', sh: { s: 'r', f: .5 }, t: 'django', th: { s: 'l', f: .5 }, label: 'Basic', lt: .5 },
+    { s: 'static', sh: { s: 'r', f: .5 }, t: 'django', th: { s: 'l', f: .78 }, label: 'whitenoise', lt: .5 },
+    { s: 'cp', sh: { s: 'l', f: .5 }, t: 'kong', th: { s: 't', f: .85 }, label: 'deck sync', lt: .5, kind: 'cfg' },
+  ],
+});
+
+flowchart('d-decide', {
+  w: 1180, h: 610, acc: 'var(--c-neutral)',
+  nodes: [
+    { id: 'req', x: 24, y: 40, w: 190, h: 52, title: 'Request', sub: '/oidc/inventory/…', pill: true },
+    { id: 'q1', x: 270, y: 40, w: 250, kind: 'dec', title: 'Authorization: Bearer …?', mono: true },
+    { id: 'q2', x: 270, y: 160, w: 250, kind: 'dec', title: 'Authorization: Basic …?', mono: true },
+    { id: 'q3', x: 270, y: 280, w: 250, kind: 'dec', title: 'inventory_session cookie?', mono: true },
+    { id: 'q4', x: 270, y: 400, w: 250, kind: 'dec', title: '?code & state (callback)?', mono: true },
+    { id: 'redir', x: 270, y: 520, w: 250, kind: 'err', title: '302 → Auth0 /authorize', sub: 'PKCE · audience · state', mono: true },
+    { id: 'a1', x: 590, y: 34, w: 270, title: 'bearer', sub: 'verify JWT: JWKS · iss · exp · aud', acc: C.j, mono: true },
+    { id: 'a2', x: 590, y: 154, w: 270, title: 'client_credentials', sub: 'POST /oauth/token (cached)', acc: C.cc, mono: true },
+    { id: 'a3', x: 590, y: 274, w: 270, title: 'session', sub: 'decrypt cookie · check timeouts', acc: C.b, mono: true },
+    { id: 'a4', x: 590, y: 394, w: 270, title: 'authorization_code', sub: 'code → tokens · Set-Cookie · 302 back', acc: C.b, mono: true },
+    { id: 'deny', x: 940, y: 40, w: 210, kind: 'err', title: '401 Unauthorized' },
+    { id: 'dk', x: 940, y: 220, w: 210, title: 'DataKit', sub: 'Authorization: Basic user1' },
+    { id: 'dj', x: 940, y: 340, w: 210, kind: 'ok', title: 'Django /api/items/', sub: '200 JSON' },
+  ],
+  edges: [
+    { s: 'req', sh: { s: 'r' }, t: 'q1', th: { s: 'l' } },
+    { s: 'q1', sh: { s: 'r' }, t: 'a1', th: { s: 'l' }, label: 'yes', lcls: 'yes', color: C.j, mk: 'e' },
+    { s: 'q1', sh: { s: 'b' }, t: 'q2', th: { s: 't' }, label: 'no', lcls: 'no' },
+    { s: 'q2', sh: { s: 'r' }, t: 'a2', th: { s: 'l' }, label: 'yes', lcls: 'yes', color: C.cc },
+    { s: 'q2', sh: { s: 'b' }, t: 'q3', th: { s: 't' }, label: 'no', lcls: 'no' },
+    { s: 'q3', sh: { s: 'r' }, t: 'a3', th: { s: 'l' }, label: 'yes', lcls: 'yes', color: C.b },
+    { s: 'q3', sh: { s: 'b' }, t: 'q4', th: { s: 't' }, label: 'no / expired', lcls: 'no' },
+    { s: 'q4', sh: { s: 'r' }, t: 'a4', th: { s: 'l' }, label: 'yes', lcls: 'yes', color: C.b },
+    { s: 'q4', sh: { s: 'b' }, t: 'redir', th: { s: 't' }, label: 'no', lcls: 'no' },
+    { s: 'a1', sh: { s: 'r', f: .35 }, t: 'deny', th: { s: 'l', f: .35 }, label: 'invalid', kind: 'err' },
+    { s: 'a2', sh: { s: 'r', f: .3 }, t: 'deny', th: { s: 'l', f: .7 }, label: 'rejected', kind: 'err', lt: .45 },
+    { s: 'a1', sh: { s: 'r', f: .7 }, t: 'dk', th: { s: 'l', f: .25 }, color: C.j },
+    { s: 'a2', sh: { s: 'r', f: .7 }, t: 'dk', th: { s: 'l', f: .5 }, color: C.cc },
+    { s: 'a3', sh: { s: 'r', f: .5 }, t: 'dk', th: { s: 'l', f: .75 }, color: C.b },
+    { s: 'dk', sh: { s: 'b' }, t: 'dj', th: { s: 't' } },
+    { s: 'a4', sh: { s: 't', f: .15 }, t: 'q3', th: { s: 'r', f: .8 }, label: 'next request has cookie', kind: 'cfg', lt: .6 },
+  ],
+});
+
+const BROWSER = { title: 'Browser', sub: 'Chrome', acc: C.b };
+const AUTH0 = { title: 'Auth0', sub: '<tenant>.us.auth0.com' };
+const KONG_O = { title: '/oidc/inventory', sub: 'Kong · openid-connect', mono: true };
+const DJANGO = { title: 'Django', sub: '/api/items/ · :3333' };
+
+steps('d-browser', {
+  acc: C.b, lanes: [BROWSER, AUTH0, KONG_O, DJANGO],
+  rows: [
+    { from: 0, to: 2, label: 'GET /oidc/inventory/   (no session cookie)' },
+    { from: 2, to: 0, resp: 1, label: '302 → Auth0 /authorize · PKCE challenge · audience · state' },
+    { from: 0, to: 1, label: 'GET /authorize' },
+    { note: 'Universal Login: user signs in', at: 1 },
+    { from: 1, to: 0, resp: 1, label: '302 → callback ?code&state' },
+    { from: 0, to: 2, label: 'GET /oidc/inventory/?code=…&state=…' },
+    { from: 2, to: 1, label: 'POST /oauth/token · code + secret' },
+    { from: 1, to: 2, resp: 1, label: 'id_token + access_token (JWT)' },
+    { note: 'verify with JWKS: signature · iss · exp · aud', at: 2 },
+    { from: 2, to: 0, resp: 1, label: '302 to original URL · Set-Cookie: inventory_session' },
+    { sep: 'every later request' },
+    { from: 0, to: 2, label: 'GET /oidc/inventory/ · Cookie: inventory_session' },
+    { note: 'session valid → DataKit adds Basic user1', at: 2 },
+    { from: 2, to: 3, label: 'Basic + X-Authenticated-*' },
+    { from: 3, to: 2, resp: 1, label: '200 JSON' },
+    { from: 2, to: 0, resp: 1, label: '200 · DRF browsable API page' },
+    { sep: 'logout' },
+    { from: 0, to: 2, label: 'GET /oidc/inventory/logout' },
+    { from: 2, to: 0, resp: 1, label: '302 → Auth0 end_session · Kong session cleared' },
+    { from: 0, to: 1, label: 'end_session' },
+    { from: 1, to: 0, resp: 1, label: '302 → logout_redirect_uri' },
+  ],
+});
+
+const APP = { title: 'curl / app', sub: 'M2M client', acc: C.j };
+steps('d-bearer', {
+  acc: C.j, lanes: [APP, AUTH0, KONG_O, DJANGO],
+  rows: [
+    { from: 0, to: 1, label: 'POST /oauth/token' },
+    { note: 'client_credentials + audience', at: 1 },
+    { from: 1, to: 0, resp: 1, label: 'access_token (RS256 JWT)' },
+    { from: 0, to: 2, label: 'GET /oidc/inventory/ · Authorization: Bearer <JWT>' },
+    { from: 2, to: 1, label: 'GET JWKS (first time, then cached)' },
+    { note: 'signature · iss · exp · aud checked locally', at: 2 },
+    { from: 2, to: 3, label: 'Basic + X-Authenticated-*' },
+    { from: 3, to: 2, resp: 1, label: '200 JSON' },
+    { from: 2, to: 0, resp: 1, label: '200 JSON' },
+  ],
+});
+
+steps('d-cc', {
+  acc: C.cc, lanes: [{ ...APP, acc: C.cc }, AUTH0, KONG_O, DJANGO],
+  rows: [
+    { from: 0, to: 2, label: 'GET /oidc/inventory/ · Authorization: Basic id:secret' },
+    { note: 'token cache miss', at: 2 },
+    { from: 2, to: 1, label: 'POST /oauth/token + audience' },
+    { from: 1, to: 2, resp: 1, label: 'access_token' },
+    { note: 'token verified and cached (cache_tokens)', at: 2 },
+    { from: 2, to: 3, label: 'Basic + X-Authenticated-*' },
+    { from: 3, to: 2, resp: 1, label: '200 JSON' },
+    { from: 2, to: 0, resp: 1, label: '200 JSON' },
+    { sep: 'later calls with the same credentials' },
+    { from: 0, to: 2, label: 'GET /oidc/inventory/ · Authorization: Basic id:secret' },
+    { note: 'cached token reused · no call to Auth0', at: 2 },
+    { from: 2, to: 3, label: 'Basic + X-Authenticated-*' },
+  ],
+});
+
+steps('d-mcp', {
+  acc: C.k,
+  lanes: [{ title: 'MCP client', sub: 'Claude Code', acc: C.k }, { title: 'Kong AI Gateway', sub: ':11443 /mcp/inventory' },
+          { title: '/inventory', sub: 'Kong · key-auth', mono: true }, DJANGO],
+  rows: [
+    { from: 0, to: 1, label: 'tools/call · apikey: test' },
+    { note: 'ai-mcp-proxy maps the tool to a REST call', at: 1 },
+    { from: 1, to: 2, label: 'GET /inventory/ · apikey' },
+    { note: 'key-auth → consumer user1 · DataKit Basic', at: 2 },
+    { from: 2, to: 3, label: 'GET /api/items/ · Basic' },
+    { from: 3, to: 2, resp: 1, label: '200 JSON' },
+    { from: 2, to: 1, resp: 1, label: '200 JSON' },
+    { from: 1, to: 0, resp: 1, label: 'tool result' },
+  ],
+});
+})();
+</script>
+</body>
+</html>

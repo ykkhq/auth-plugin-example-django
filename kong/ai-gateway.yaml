@@ -1,0 +1,155 @@
+# Kong AI Gateway 2.2 (Konnect AI Gateway "django-ai-gw"): exposes the
+# inventory API as an MCP server. Applied with kongctl, not decK:
+#   kongctl apply -f kong/ai-gateway.yaml --pat "$(cat ~/.kong/kpat)"
+#
+# Upstream is the Kong Gateway 3.16 data plane (kong/kong.yaml), not Django
+# directly, so apikey -> Basic auth bridging stays in one place.
+#
+#   MCP client --apikey--> AI GW :11443/mcp/inventory  (MCP server)
+#              --apikey--> Kong GW :8443/inventory/...  (key-auth + datakit)
+#              --Basic-->  Django :3333/api/items/...
+ai_gateway_mcp_servers:
+  - ref: inventory-mcp
+    ai_gateway: !lookup {name: django-ai-gw}
+    name: inventory-mcp
+    display_name: Inventory MCP
+    type: conversion-listener
+    config:
+      # AI GW container -> Kong GW DP host-published https port. Kong GW
+      # serves kong/tls/server.crt for this SNI; the AI GW DP trusts its CA
+      # (kong/tls/ca.crt, see start_ai_dp.sh).
+      url: https://host.docker.internal:8443/inventory
+      route:
+        paths:
+        - /mcp/inventory
+        strip_path: true
+        protocols:
+        - http
+        - https
+      max_request_body_size: 8192
+      server:
+        timeout: 60000
+        # Forwards the MCP client's "apikey" header to Kong GW key-auth.
+        forward_client_headers: true
+    tools:
+    - name: list-items
+      description: List all inventory items.
+      method: GET
+      path: /mcp/inventory/
+      annotations:
+        title: List items
+        read_only_hint: true
+    - name: get-item
+      description: Retrieve a single inventory item by its id.
+      method: GET
+      path: /mcp/inventory/{id}/
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+        description: Item id
+      annotations:
+        title: Get item
+        read_only_hint: true
+    - name: create-item
+      description: Create a new inventory item. sku must be unique.
+      method: POST
+      path: /mcp/inventory/
+      request_body:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              - sku
+              - unit_price
+              properties: &item_properties
+                name:
+                  type: string
+                  maxLength: 200
+                  description: Item name
+                sku:
+                  type: string
+                  maxLength: 64
+                  description: Unique stock keeping unit
+                description:
+                  type: string
+                  description: Free-text description
+                category:
+                  type: string
+                  maxLength: 100
+                  description: Category name
+                quantity:
+                  type: integer
+                  minimum: 0
+                  description: Units in stock (default 0)
+                unit_price:
+                  type: string
+                  pattern: '^-?\d{0,8}(\.\d{0,2})?$'
+                  description: Decimal price as a string, e.g. "12.50"
+      annotations:
+        title: Create item
+    - name: update-item
+      description: Replace all fields of an existing inventory item (PUT).
+      method: PUT
+      path: /mcp/inventory/{id}/
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+        description: Item id
+      request_body:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              - sku
+              - unit_price
+              properties: *item_properties
+      annotations:
+        title: Update item
+        idempotent_hint: true
+    - name: patch-item
+      description: Update only the given fields of an existing inventory item (PATCH).
+      method: PATCH
+      path: /mcp/inventory/{id}/
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+        description: Item id
+      request_body:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: *item_properties
+      annotations:
+        title: Patch item
+    - name: delete-item
+      description: Permanently delete an inventory item by its id.
+      method: DELETE
+      path: /mcp/inventory/{id}/
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+        description: Item id
+      annotations:
+        title: Delete item
+        destructive_hint: true
+        idempotent_hint: true

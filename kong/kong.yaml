@@ -1,6 +1,18 @@
 _format_version: "3.0"
 _konnect:
-  control_plane_name: kumagai-local
+  control_plane_name: django-apigw
+certificates:
+# Server cert for the AI Gateway -> Kong Gateway https hop, signed by the
+# private CA from kong/gen-tls.sh. Contents come from env so the key never
+# lands in git:
+# (PEM flattened to one line with \n escapes so it fits a quoted scalar):
+#   export DECK_GW_TLS_CERT="$(awk '{printf "%s\\n",$0}' kong/tls/server.crt)"
+#   export DECK_GW_TLS_KEY="$(awk '{printf "%s\\n",$0}' kong/tls/server.key)"
+- id: 22230d19-e1aa-4908-a779-fc8e227405b7
+  cert: "${{ env "DECK_GW_TLS_CERT" }}"
+  key: "${{ env "DECK_GW_TLS_KEY" }}"
+  snis:
+  - name: host.docker.internal
 consumers:
 - basicauth_credentials:
   - password: 3f788a76c4480000de899fae3abec529991b28aa
@@ -124,6 +136,100 @@ plugins:
   - https
   route: django-route-items
   service: django-api-items
+# --- OIDC route (/oidc/inventory): Auth0 login for browsers (session cookie)
+# and OAuth2 for curl/apps (Bearer JWT or client_credentials). Values come
+# from env, see kong/auth0.env.example and README "OIDC with Auth0".
+- config:
+    nodes:
+    - name: creds
+      type: static
+      values:
+        password: awesome user1
+        username: user1
+    - inputs:
+        password: creds.password
+        username: creds.username
+      jq: '{ Authorization: ("Basic " + ("\(.username):\(.password)" | @base64)) }'
+      name: Create_Basic_Auth
+      output: service_request.headers
+      type: jq
+  enabled: true
+  instance_name: oidc-create-basic-auth
+  name: datakit
+  protocols:
+  - http
+  - https
+  route: django-route-items-oidc
+- config:
+    issuer: "${{ env "DECK_AUTH0_ISSUER" }}"
+    # Required on Kong 3.16+: tls_certificate_verify is on globally, and the
+    # DP rejects the whole config if ssl_verify is left at its default (false).
+    # Auth0 uses a public CA (KONG_LUA_SSL_TRUSTED_CERTIFICATE=system).
+    ssl_verify: true
+    client_id:
+    - "${{ env "DECK_AUTH0_WEB_CLIENT_ID" }}"
+    client_secret:
+    - "${{ env "DECK_AUTH0_WEB_CLIENT_SECRET" }}"
+    client_auth:
+    - client_secret_post
+    redirect_uri:
+    - https://localhost:8443/oidc/inventory/
+    scopes:
+    - openid
+    - profile
+    - email
+    # authorization_code + session: browser login, then Kong session cookie
+    # bearer: Auth0 access token (JWT) from curl/apps
+    # client_credentials: client id/secret sent to Kong as Basic auth
+    auth_methods:
+    - authorization_code
+    - session
+    - bearer
+    - client_credentials
+    client_credentials_param_type:
+    - header
+    # Auth0 only issues JWT access tokens when an API audience is requested
+    audience_required:
+    - "${{ env "DECK_AUTH0_AUDIENCE" }}"
+    authorization_query_args_names:
+    - audience
+    authorization_query_args_values:
+    - "${{ env "DECK_AUTH0_AUDIENCE" }}"
+    token_post_args_names:
+    - audience
+    token_post_args_values:
+    - "${{ env "DECK_AUTH0_AUDIENCE" }}"
+    # Browser session management (Kong-side encrypted cookie)
+    session_secret: "${{ env "DECK_OIDC_SESSION_SECRET" }}"
+    cache_tokens_salt: "${{ env "DECK_OIDC_CACHE_TOKENS_SALT" }}"
+    session_cookie_name: inventory_session
+    session_cookie_secure: true
+    session_cookie_http_only: true
+    session_cookie_same_site: Lax
+    session_idling_timeout: 900
+    session_rolling_timeout: 3600
+    session_absolute_timeout: 28800
+    # GET/POST /oidc/inventory/logout -> drop session, Auth0 end_session
+    logout_uri_suffix: /logout
+    logout_methods:
+    - GET
+    - POST
+    logout_redirect_uri:
+    - https://localhost:8443/oidc/inventory/
+    # Pass the authenticated identity to Django
+    upstream_headers_claims:
+    - sub
+    - email
+    upstream_headers_names:
+    - X-Authenticated-User
+    - X-Authenticated-Email
+  enabled: true
+  instance_name: auth0-oidc
+  name: openid-connect
+  protocols:
+  - http
+  - https
+  route: django-route-items-oidc
 services:
 - host: 192.168.106.2
   name: django-api-items
@@ -132,8 +238,40 @@ services:
   routes:
   - methods:
     - GET
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
     name: django-route-items
     paths:
     - /inventory
+    protocols:
+    - https
+  - methods:
+    - GET
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+    name: django-route-items-oidc
+    paths:
+    - /oidc/inventory
+    protocols:
+    - https
+# Django static assets (DRF browsable API / admin CSS, JS, images), served by
+# whitenoise. DRF pages reference them as absolute /static/... URLs, which
+# fall outside /oidc/inventory, so they need their own route. Left public on
+# purpose: these are stock framework assets with no user data.
+- host: 192.168.106.2
+  name: django-static
+  path: /static
+  port: 3333
+  routes:
+  - methods:
+    - GET
+    - HEAD
+    name: django-route-static
+    paths:
+    - /static
     protocols:
     - https

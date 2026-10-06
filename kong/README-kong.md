@@ -5,6 +5,16 @@ Kong gateway in front of the Django inventory API from this repo.
 
 ## Auth model
 
+Current `kong.yaml` routes (both inject Django Basic auth via DataKit):
+
+- `/inventory`: key-auth (`apikey` header). The MCP server uses this route.
+- `/oidc/inventory`: `openid-connect` with Auth0. Browsers log in and get a
+  Kong session cookie; curl and apps use a Bearer JWT or client_credentials.
+  Setup steps are in the top-level `README.md`, section "OIDC with Auth0".
+
+The rest of this section describes the original session-bridge design
+(the `pre-function` plugin, now disabled):
+
 ```
 Browser --(OIDC login)--> Kong --(shared service-account session)--> Django
 ```
