@@ -1,0 +1,61 @@
+# Grafana monitoring for the Kong data plane (route + user activity).
+#   Prometheus  <- scrapes Kong's prometheus plugin via http://kong-dp:8000/kong-metrics
+#   Alloy       <- reads the Kong DP's stdout (file-log JSON lines) -> Loki
+#   Grafana     -> http://localhost:3000 (dashboards provisioned from ./grafana)
+# Requires the external kong-net network (created by ../docker-compose.yml) with
+# the Kong DP attached as "kong-dp":
+#   docker network connect --alias kong-dp kong-net <kong-dp-container>
+services:
+  prometheus:
+    image: prom/prometheus:v3.4.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks: [kong-net]
+
+  loki:
+    image: grafana/loki:3.5.0
+    command: -config.file=/etc/loki/loki.yml
+    volumes:
+      - ./loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki-data:/loki
+    networks: [kong-net]
+
+  alloy:
+    image: grafana/alloy:v1.8.3
+    command: run /etc/alloy/config.alloy --storage.path=/var/lib/alloy/data
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      # read-only access to container logs (Kong DP stdout)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on: [loki]
+    networks: [kong-net]
+
+  grafana:
+    image: grafana/grafana:12.0.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on: [prometheus, loki]
+    networks: [kong-net]
+
+volumes:
+  prometheus-data:
+  loki-data:
+  grafana-data:
+
+networks:
+  kong-net:
+    external: true

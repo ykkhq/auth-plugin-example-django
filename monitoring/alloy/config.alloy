@@ -1,0 +1,77 @@
+// Ship Kong's per-request JSON log lines (file-log plugin -> DP stdout) to Loki.
+// Every container's logs are read, but only Kong access-log lines (JSON with a
+// "latencies" object) are kept, so the DP container name doesn't matter.
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  labels        = {"job" = "docker"}
+  relabel_rules = discovery.relabel.containers.rules
+  forward_to    = [loki.process.kong.receiver]
+}
+
+loki.process "kong" {
+  // drop everything that isn't a Kong access-log line
+  stage.match {
+    selector = "{job=\"docker\"} !~ \"latencies\""
+    action   = "drop"
+  }
+
+  stage.json {
+    expressions = {
+      route  = "route.name",
+      method = "request.method",
+      status = "response.status",
+    }
+  }
+
+  // "2", "4", "5" -> status_class label (queries show it as 2xx/4xx/5xx)
+  stage.regex {
+    source     = "status"
+    expression = "^(?P<status_class>\\d)"
+  }
+
+  // Low-cardinality labels only. The user (token sub), URI and latencies stay
+  // in the JSON line and are parsed at query time with `| json`.
+  stage.labels {
+    values = {
+      route        = "",
+      method       = "",
+      status_class = "",
+    }
+  }
+
+  // Prometheus scraping /kong-metrics every 15s is not user traffic
+  stage.match {
+    selector = "{route=\"kong-metrics-route\"}"
+    action   = "drop"
+  }
+
+  stage.static_labels {
+    values = {
+      source = "kong",
+    }
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

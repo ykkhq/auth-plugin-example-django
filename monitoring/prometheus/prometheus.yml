@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Kong prometheus plugin, exposed by the kong-metrics route (kong-net only).
+  - job_name: kong
+    metrics_path: /kong-metrics
+    static_configs:
+      - targets: ["kong-dp:8000"]
+        labels:
+          dp: kong-dp

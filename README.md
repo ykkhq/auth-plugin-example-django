@@ -16,6 +16,19 @@ curl/アプリ --(Auth0 Bearer JWT または client_credentials)--> Kong API gat
 OIDCの設定手順（Auth0側の設定、deck sync、ブラウザ/curlでの確認）は下記英文の
 「OIDC with Auth0」を参照。
 
+セッションの保存場所：Kong側には保存しない。ログイン後のセッション情報（トークン等）は
+`session_secret` で暗号化され、ブラウザの `inventory_session` クッキー自体に入る
+（`session_storage: cookie`、デフォルト）。サーバー側で即時に無効化したい場合は
+`session_storage: redis` に変更する（クッキーにはセッションIDのみ入り、本体はRedisに保存される）。
+詳細と切り替え手順は下記英文の「Where sessions are stored」「Switching to Redis」を参照。
+
+Django側の変更：OIDC認証はKong側で完結し、Djangoはトークンを一切扱わない。Web UI（`/items`）用に、
+Kongが転送する `X-Authenticated-User`（Auth0の `sub`）でログインさせる `RemoteUserBackend` と
+`inventory/gateway.py` のミドルウェアを追加、`CSRF_TRUSTED_ORIGINS` を設定、ログアウトをKongの
+`/items/logout` に変更、Djangoのポートを非公開にした（Kong以外からヘッダーを偽装させないため）。
+API（`/oidc/inventory`）側のDjangoは変更なし（従来通り `kong_service` のBasic認証）。
+詳細は下記英文の「What changed on the Django side」を参照。
+
 Key Authでapikey認証を行い、Datakitでハードコードされたusername+passwordをbase64でエンコードしてDjangoに対してBasic認証をする。
 
 pre functionの実装は参考として残しておく。
@@ -255,6 +268,72 @@ nothing stored server-side):
 | `session_absolute_timeout`   | 28800 s      | Re-login required after 8 h, whatever the activity |
 | `logout_uri_suffix`          | `/logout`    | `GET/POST /oidc/inventory/logout` clears the session and logs out of Auth0 |
 
+### Where sessions are stored
+
+**Kong keeps no session state.** `session_storage` is left at its default, `cookie`:
+
+- After the Auth0 login, Kong puts the session data (ID token, access token, any
+  refresh token, expiry and timeouts) **into the `inventory_session` cookie itself**,
+  encrypted with `session_secret` (`DECK_OIDC_SESSION_SECRET`). The browser holds the
+  cookie but can't read or change it.
+- On every request, Kong decrypts and checks the cookie. There is no server-side
+  lookup, so any Kong node, and both `/oidc/inventory` and `/items`, accept the same
+  cookie.
+- Tokens are large, so Kong may split the cookie into several parts
+  (`inventory_session`, `inventory_session_2`, …).
+
+Kong's per-node **memory cache** holds Auth0's discovery document, its signing keys
+(JWKS), tokens obtained through client_credentials, and the rate-limit counters
+(`policy: local`). It holds no user sessions, and it is lost when the container restarts.
+
+The **web UI (`/items`) also has a Django session**: when `RemoteUserBackend` logs the
+Auth0 user in, Django sets its own `sessionid` cookie and stores the session in its
+database (the `django_session` table in the container's SQLite). It only remembers which
+Django user the browser is. Kong re-sends the verified user on every request anyway.
+
+| | Cookie storage (current) | Server-side: `session_storage: redis` / `memcached` |
+|---|---|---|
+| Session data | In the browser, encrypted | In Redis or Memcached; the cookie only holds a session ID |
+| Extra infrastructure | None | A Redis or Memcached server |
+| Logout | Clears that browser's cookie. A copied cookie stays valid until the idle (15 min) or absolute (8 h) timeout. | Deletes the session on the server, so every copy stops working at once |
+| Cookie size | Large (tokens inside) | Small |
+| Several Kong nodes | Works as is | All nodes must share the same Redis |
+
+Cookie storage is fine for this demo. Switch to `session_storage: redis` (plus the
+plugin's `session_redis_*` settings) if logout must end a session everywhere
+immediately, or if cookie size becomes a problem.
+
+#### Switching to Redis (not applied in this demo)
+
+1. Add Redis to `docker-compose.yml` on `kong-net`, so the Kong DP reaches it as
+   `redis:6379`. Don't publish its port, for the same reason Django's isn't:
+
+   ```yaml
+     redis:
+       image: redis:7-alpine
+       command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+       networks: [kong-net]
+   ```
+
+2. In the `openid-connect` plugin in `kong/kong.yaml`, next to the other `session_*`
+   settings:
+
+   ```yaml
+   session_storage: redis
+   session_redis_host: redis
+   session_redis_port: 6379
+   session_redis_password: "${{ env "DECK_REDIS_PASSWORD" }}"
+   # session_redis_ssl: true    # for a TLS Redis
+   ```
+
+   Keep `session_secret`, because Kong still uses it to protect the cookie. Check the
+   field names against your Kong version with `deck file validate` or
+   `deck gateway diff` before syncing.
+
+3. To verify, log in at https://localhost:8443/items/ and run
+   `docker exec <redis-container> redis-cli -a "$REDIS_PASSWORD" --scan`. The session
+   key should be listed, and `inventory_session` should be a single small cookie.
+
 ### 1. Auth0 setup
 
 In the Auth0 dashboard (https://manage.auth0.com):
@@ -447,6 +526,23 @@ Setup:
    ```
 4. Open `https://localhost:8443/items/`, sign in at Auth0, and you land on the item list.
 
+#### What changed on the Django side
+
+Kong does all of the OIDC work: the Auth0 login, token checks and the session. Django
+never sees a token. The only Django changes let it accept the user Kong forwards:
+
+| File | Change |
+|------|--------|
+| `inventory/gateway.py` | New `KongRemoteUserMiddleware` (`PersistentRemoteUserMiddleware` with `header = "HTTP_X_AUTHENTICATED_USER"`). It reads the header because gunicorn can't set `REMOTE_USER` from one. Being "Persistent", it doesn't log the user out on a request without the header. |
+| `inventory_management/settings.py` | `MIDDLEWARE`: the middleware above, after `AuthenticationMiddleware`. `AUTHENTICATION_BACKENDS`: `RemoteUserBackend` (creates and logs in the user), then `ModelBackend` (keeps password login for `/login/` and `kong_service`). `CSRF_TRUSTED_ORIGINS` from the environment, default `https://localhost:8443`. |
+| `inventory/templates/inventory/base.html` | When `X-Authenticated-User` is present, **Log out** links to Kong's `/items/logout` instead of posting to Django's logout. |
+| `docker-compose.yml` | Port 3333 no longer published. Django is reachable only on `kong-net`, which is what makes trusting the header safe. |
+
+The JSON API is unchanged. On `/oidc/inventory`, Kong checks the OIDC token and then
+calls Django with Basic auth as the shared `kong_service` account, just like the apikey
+route. So the API sees one service account, and only the web UI (`/items`) sees
+individual Auth0 users.
+
 ### Troubleshooting
 
 - **`503` and `DNS resolution failed ... django` in the data plane log**: the Kong
@@ -479,6 +575,55 @@ Setup:
   changed.
 - The apikey route (`/inventory`) and the MCP server don't change.
   `curl -k https://localhost:8443/inventory/ -H "apikey:test"` still works.
+
+## Monitoring with Grafana (route and user activity)
+
+`monitoring/` runs Prometheus, Loki, Grafana Alloy and Grafana on `kong-net`, with two
+provisioned dashboards in the **Kong** folder:
+
+| Dashboard | Source | Shows |
+|---|---|---|
+| **Kong · Route activity** | Prometheus (Kong `prometheus` plugin) | Requests/s by route, success rate, status classes, p95 latency (total, Kong vs Django), 401/403/429 by route, bandwidth |
+| **Kong · User activity** | Loki (Kong `file-log` JSON) | Active users, requests per user, top users, p95 latency per user, top rate-limited users, 401s by client IP, per-user/route/status table, recent requests |
+
+```
+Kong DP ──prometheus plugin──▶ /kong-metrics (kong-net only) ◀── Prometheus ─┐
+        ──file-log JSON → stdout──▶ Alloy (Docker logs) ──▶ Loki ────────────┼──▶ Grafana :3000
+```
+
+How the user is identified: the `file-log` plugin adds a `user` field set to the
+`openid-connect` virtual credential, which is the token's `sub` (an Auth0 user
+`auth0|…`, or an M2M client `<client-id>@clients`). On the apikey route it is the
+key-auth credential id. Request and response headers are removed from the log, so
+cookies and tokens are never stored. `user` is not a Loki label (that would mean too
+many label values); queries parse it with `| json`.
+
+Kong config (in `kong/kong.yaml`): global `prometheus` and `file-log` plugins, plus a
+`kong-metrics` service and route. The route loops back to the DP's own status API
+(`127.0.0.1:8007/metrics`), and `ip-restriction` allows only `kong-net`
+(`172.18.0.0/16`). From the host it returns 403.
+
+Setup:
+
+```bash
+# 1. Kong DP on kong-net with the alias Prometheus scrapes
+docker network connect --alias kong-dp kong-net <kong-dp-container>
+# 2. Sync kong/kong.yaml (adds the plugins and the metrics route)
+# 3. Start the stack
+cd monitoring && GRAFANA_ADMIN_PASSWORD='<choose one>' docker compose up -d
+```
+
+Open http://localhost:3000 (user `admin`; the password defaults to `admin` if unset).
+Grafana and Prometheus (`:9090`) are published on `127.0.0.1` only.
+To change a dashboard, edit `monitoring/grafana/generate_dashboards.py` and rerun it.
+Grafana reloads the JSON within about 10 seconds.
+
+Notes:
+- Prometheus `increase()` needs two samples, so the first occurrence of a new status
+  code on a route isn't counted in "Rate-limited (429) in range". The Loki-based user
+  dashboard counts every request.
+- Alloy reads all container logs through the Docker socket, but keeps only Kong
+  access-log lines and drops Prometheus's own scrapes.
 
 ## MCP server (Kong AI Gateway 2.2)
 

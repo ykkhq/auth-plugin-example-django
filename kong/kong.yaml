@@ -319,6 +319,45 @@ plugins:
   - http
   - https
   route: django-route-static
+# --- Monitoring (monitoring/, Grafana) -----------------------------------
+# Global: per-route request / status / latency / bandwidth metrics, served on
+# the DP status API and exposed to Prometheus via the kong-metrics route.
+- config:
+    status_code_metrics: true
+    latency_metrics: true
+    bandwidth_metrics: true
+    upstream_health_metrics: true
+  enabled: true
+  instance_name: prometheus
+  name: prometheus
+  protocols:
+  - http
+  - https
+# Global: one JSON line per request on the DP's stdout; Grafana Alloy ships it
+# to Loki. Headers are dropped so cookies and tokens never reach the logs;
+# "user" is the openid-connect virtual credential (the token's sub claim).
+- config:
+    path: /dev/stdout
+    custom_fields_by_lua:
+      request.headers: return nil
+      response.headers: return nil
+      user: local c = kong.client.get_credential() return c and c.id or nil
+  enabled: true
+  instance_name: access-log-json
+  name: file-log
+  protocols:
+  - http
+  - https
+# Only containers on kong-net (Prometheus) may scrape /kong-metrics.
+- config:
+    allow:
+    - 172.18.0.0/16
+  enabled: true
+  instance_name: kong-metrics-kong-net-only
+  name: ip-restriction
+  protocols:
+  - http
+  route: kong-metrics-route
 services:
 - host: django
   name: django-api-items
@@ -393,3 +432,18 @@ services:
     protocols:
     - https
     strip_path: false
+# Loopback to this DP's own status API (127.0.0.1:8007), where the
+# prometheus plugin serves /metrics. Plain http, kong-net callers only.
+- name: kong-metrics
+  host: 127.0.0.1
+  port: 8007
+  path: /metrics
+  protocol: http
+  routes:
+  - methods:
+    - GET
+    name: kong-metrics-route
+    paths:
+    - /kong-metrics
+    protocols:
+    - http

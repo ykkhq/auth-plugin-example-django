@@ -298,8 +298,8 @@ const ICONS = {
 };
 
 const NODES = [
-  { id: 'browser', x: 40, y: 170, w: 210, icon: 'browser', title: 'Browser', sub: 'DRF browsable API',
-    rows: [{ k: 'cookie', v: 'inventory_session' }] },
+  { id: 'browser', x: 40, y: 170, w: 240, icon: 'browser', title: 'Browser', sub: 'DRF browsable API',
+    rows: [{ k: 'inventory_session', v: 'tokens, encrypted' }, { k: 'sessionid', v: 'Django session' }] },
   { id: 'app', x: 40, y: 430, w: 210, icon: 'terminal', title: 'curl / app', sub: 'Auth0 M2M client',
     rows: [{ k: 'Bearer', v: 'Auth0 JWT' }, { k: 'Basic', v: 'client id:secret' }, { k: 'apikey', v: 'test' }] },
   { id: 'mcp', x: 40, y: 720, w: 210, icon: 'sparkle', title: 'MCP client', sub: 'Claude Code',
@@ -309,11 +309,12 @@ const NODES = [
            { k: 'API', v: 'audience · RS256' }, { k: '.well-known', v: 'discovery · JWKS' }] },
   { id: 'aigw', x: 360, y: 720, w: 240, icon: 'cpu', title: 'Kong AI Gateway 2.2', sub: ':11443 /mcp/inventory',
     chips: ['ai-mcp-proxy', 'conversion-listener'] },
-  { id: 'kong', group: true, x: 690, y: 130, icon: 'gateway', title: 'Kong Gateway 3.16', sub: 'data plane · https://localhost:8443' },
+  { id: 'kong', group: true, x: 690, y: 130, icon: 'gateway', title: 'Kong Gateway 3.16', sub: ':8443 · stores no sessions' },
   { id: 'oidc', parent: 'kong', w: 300, icon: 'lock', tint: '#6366f1', mono: true, title: '/oidc/inventory', sub: 'django-route-items-oidc',
     chips: ['openid-connect', 'rate-limiting', 'datakit'],
     rows: [{ k: 'rate limit', v: '10/min · 200/h per user (sub)' }, { k: 'browser', v: 'authorization_code · session' }, { k: 'apps', v: 'bearer · client_credentials (-m2m route)' },
-           { k: 'session', v: 'idle 15m · roll 1h · abs 8h' }, { k: 'ssl_verify', v: 'true' }] },
+           { k: 'session', v: 'idle 15m · roll 1h · abs 8h' }, { k: 'session_storage', v: 'cookie (in the browser)' },
+           { k: 'ssl_verify', v: 'true' }] },
   { id: 'web', parent: 'kong', w: 300, icon: 'browser', tint: '#0ea5e9', mono: true, title: '/items', sub: 'django-route-web',
     chips: ['openid-connect'],
     rows: [{ k: 'auth', v: 'authorization_code · session' }, { k: 'session', v: 'shared inventory_session' },
@@ -326,7 +327,7 @@ const NODES = [
   { id: 'cp', x: 1140, y: -10, w: 240, icon: 'cloud', title: 'Konnect', sub: 'control plane · django-apigw',
     rows: [{ k: 'decK', v: 'kong/kong.yaml' }] },
   { id: 'django', x: 1140, y: 270, w: 260, icon: 'db', tint: '#0c4b33', title: 'Django + DRF', sub: 'django:3333 · kong-net only',
-    rows: [{ id: 'webui', k: '/items/', v: 'web UI · RemoteUserBackend' }, { id: 'api', k: '/api/items/', v: 'Basic auth' }, { id: 'hdr', k: 'X-Authenticated-*', v: 'OIDC identity' },
+    rows: [{ id: 'webui', k: '/items/', v: 'web UI · RemoteUserBackend' }, { k: 'django_session', v: 'SQLite (web UI only)' }, { id: 'api', k: '/api/items/', v: 'Basic auth' }, { id: 'hdr', k: 'X-Authenticated-*', v: 'OIDC identity' },
            { id: 'st', k: '/static/', v: 'whitenoise' }] },
 ];
 
@@ -354,7 +355,7 @@ const EDGES = [
 const FLOWS = {
   browser: {
     name: 'Browser · API', color: '#6366f1',
-    desc: 'DRF browsable API on /oidc/inventory: authorization code + PKCE with Auth0, then a Kong-side encrypted session cookie.',
+    desc: 'DRF browsable API on /oidc/inventory: authorization code + PKCE with Auth0. The session (tokens included) is encrypted into the browser cookie; Kong stores nothing.',
     steps: [
       { e: 'b_oidc', d: 1, t: 'Request without a session', c: 'GET /oidc/inventory/ — no inventory_session cookie' },
       { e: 'b_oidc', d: -1, t: 'Kong redirects to Auth0', c: '302 → /authorize?response_type=code&code_challenge=…&audience=…&state=…' },
@@ -362,8 +363,8 @@ const FLOWS = {
       { e: 'b_auth0', d: -1, t: 'Auth0 returns the code', c: '302 → https://localhost:8443/oidc/inventory/?code=…&state=…' },
       { e: 'b_oidc', d: 1, t: 'Callback reaches Kong', c: 'openid-connect checks state + PKCE verifier' },
       { e: 'oidc_auth0', d: 1, t: 'Code exchanged for tokens', c: 'POST /oauth/token (client_secret_post) · verified via JWKS · aud required' },
-      { e: 'b_oidc', d: -1, t: 'Session cookie issued', c: '302 to original URL · Set-Cookie: inventory_session; Secure; HttpOnly; SameSite=Lax' },
-      { e: 'b_oidc', d: 1, t: 'Authenticated by session', c: 'cookie only from now on · idle 15 min · rolling 1 h · absolute 8 h' },
+      { e: 'b_oidc', d: -1, t: 'Session cookie issued', c: 'tokens + timeouts encrypted with session_secret into Set-Cookie: inventory_session (Secure; HttpOnly; SameSite=Lax) · nothing stored in Kong' },
+      { e: 'b_oidc', d: 1, t: 'Authenticated by session', c: 'Kong decrypts the cookie, no server lookup · idle 15 min · rolling 1 h · absolute 8 h' },
       { e: 'oidc_django', d: 1, t: 'Proxied to Django', c: 'DataKit → Authorization: Basic user1 · X-Authenticated-User / -Email' },
       { e: 'b_static', d: 1, t: 'Page assets', c: 'GET /static/rest_framework/… — public route, no auth' },
       { e: 'static_django', d: 1, t: 'Served by whitenoise', c: 'Kong /static → Django :3333/static' },
@@ -381,10 +382,10 @@ const FLOWS = {
       { e: 'b_auth0', d: -1, t: 'Auth0 returns the code', c: '302 → /items/?code=…&state=…' },
       { e: 'b_web', d: 1, t: 'Callback reaches Kong', c: 'openid-connect checks state + PKCE verifier' },
       { e: 'web_auth0', d: 1, t: 'Code exchanged for tokens', c: 'POST /oauth/token · ID + access token verified via JWKS' },
-      { e: 'b_web', d: -1, t: 'Session cookie issued', c: 'Set-Cookie: inventory_session — the same cookie /oidc/inventory accepts' },
-      { e: 'b_web', d: 1, t: 'Authenticated by session', c: 'cookie only from now on · idle 15 min · rolling 1 h · absolute 8 h' },
+      { e: 'b_web', d: -1, t: 'Session cookie issued', c: 'Set-Cookie: inventory_session (tokens encrypted inside) — the same cookie /oidc/inventory accepts' },
+      { e: 'b_web', d: 1, t: 'Authenticated by session', c: 'Kong decrypts the cookie, no server lookup · idle 15 min · rolling 1 h · absolute 8 h' },
       { e: 'web_django', d: 1, t: 'Identity forwarded', c: 'X-Authenticated-User = verified sub (overwrites any client value) → http://django:3333 on kong-net' },
-      { e: 'web_django', d: 1, t: 'Django logs the user in', c: 'built-in RemoteUserBackend · Django user created on first visit · no published port, so only Kong can send this header' },
+      { e: 'web_django', d: 1, t: 'Django logs the user in', c: 'built-in RemoteUserBackend · user created on first visit · Django sets its own sessionid (stored in django_session, SQLite) · no published port, so only Kong can send this header' },
       { e: 'web_django', d: -1, t: 'Page rendered', c: 'item list · forms carry Django CSRF token' },
       { e: 'b_web', d: 1, t: 'Submit a form', c: 'POST /items/add/ · csrfmiddlewaretoken · Origin https://localhost:8443 (CSRF_TRUSTED_ORIGINS)' },
       { e: 'b_web', d: 1, t: 'Log out', c: 'GET /items/logout → Kong drops the session' },
