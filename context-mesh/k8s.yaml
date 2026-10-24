@@ -1,0 +1,67 @@
+# Kong Operator resources for Context Mesh (applied by context-mesh/setup.sh).
+# Context Mesh MCP servers can only run on a control plane that Kong Operator
+# provisions, so this is separate from the Docker-based django-apigw.
+#   - Konnect control plane "django-context-mesh"
+#   - one Kong Gateway 3.16 data plane; the Context Mesh MCP server pod
+#     (mcpserver-*) runs next to it and is proxied by it
+# The Konnect PAT comes from the Secret "konnect-pat", created by setup.sh.
+kind: KonnectAPIAuthConfiguration
+apiVersion: konnect.konghq.com/v1alpha1
+metadata:
+  name: konnect-api-auth
+  namespace: default
+spec:
+  type: secretRef
+  secretRef:
+    name: konnect-pat
+  serverURL: us.api.konghq.com
+---
+kind: KonnectGatewayControlPlane
+apiVersion: konnect.konghq.com/v1alpha2
+metadata:
+  name: django-context-mesh
+  namespace: default
+spec:
+  createControlPlaneRequest:
+    name: django-context-mesh
+    labels:
+      app: django-context-mesh
+  konnect:
+    authRef:
+      name: konnect-api-auth
+---
+kind: KonnectExtension
+apiVersion: konnect.konghq.com/v1alpha2
+metadata:
+  name: django-context-mesh
+  namespace: default
+spec:
+  konnect:
+    controlPlane:
+      ref:
+        type: konnectNamespacedRef
+        konnectNamespacedRef:
+          name: django-context-mesh
+---
+apiVersion: gateway-operator.konghq.com/v1beta1
+kind: DataPlane
+metadata:
+  name: dataplane
+  namespace: default
+spec:
+  extensions:
+  - kind: KonnectExtension
+    name: django-context-mesh
+    group: konnect.konghq.com
+  network:
+    services:
+      ingress:
+        # reached with kubectl port-forward (no minikube tunnel / sudo needed)
+        type: ClusterIP
+  deployment:
+    replicas: 1
+    podTemplateSpec:
+      spec:
+        containers:
+        - name: proxy
+          image: kong/kong-gateway:3.16

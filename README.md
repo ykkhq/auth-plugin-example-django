@@ -7,6 +7,9 @@ OIDC版 (`/oidc/inventory`):
 Browser --(Auth0 OIDCログイン → Kongセッションcookie)--> Kong API gateway (dp) --(basic 認証)--> Django
 curl/アプリ --(Auth0 Bearer JWT または client_credentials)--> Kong API gateway (dp) --(basic 認証)--> Django
 
+認証フローの図（ブラウザで開く、ステップ再生あり）：[docs/auth-flow-v3.html](docs/auth-flow-v3.html)
+（`/oidc/mfg`・`/mfg`・MCP `/mcp/mfg/<resource>` を含む最新版。実行場所ごとにグループ化。旧版は [v2](docs/auth-flow-v2.html)・[v1](docs/auth-flow.html)）
+
 ### 利用Kong Plugin
 - Key auth (`/inventory`)
 - OpenID Connect (`/oidc/inventory`、Auth0、セッション管理込み)
@@ -38,12 +41,17 @@ pre functionの実装は参考として残しておく。
 
 ###  利用方法
 
-1. Kong KonnectでControl Planeを作る。
-2. Konnectの手順に従ってDataplaneをdockerで展開する。
-3. Git cloneでこのレポジトリをclone。
-4. `docker compose up --build -d` でDjangoを起動。
-5. kong/kong.yaml のdeckファイルをdeckコマンドでsyncする。（情報の修正が必要）
-6. 動作を確認する。
+1. Git cloneでこのレポジトリをclone。
+2. Auth0を設定し（下記英文「OIDC with Auth0」）、`cp kong/auth0.env.example kong/auth0.env` で値を記入。
+   KonnectのPATを `~/.kong/kpat` に置く。必要なコマンド：docker, deck, kongctl, jq, openssl, curl。
+3. `./start.sh` で一括起動（`--no-monitoring` でGrafana等を省略）。以下を順に行う：
+   証明書生成（`kong/tls/`, `kong/gw-certs/`, `kong/ai-certs/`）→ Django起動（docker compose）→
+   KonnectにCP `django-apigw` とAI Gateway `django-ai-gw` を作成（`kong/konnect.yaml`、kongctl）→
+   `kong/kong.yaml` をdeck sync → Kong GW DP（`django-apigw-dp`、:8000/:8443）起動 →
+   MCPサーバー（`kong/ai-gateway.yaml`）適用 → AI GW DP（:11000/:11443）起動 → 監視スタック起動 → 疎通確認。
+   再実行しても安全（証明書とKonnectリソースは再利用、DPコンテナは作り直し）。
+4. 動作を確認する。
+5. 片付けは `./cleanup.sh`（DPコンテナ、KonnectのCP/AI Gateway、composeスタックとボリューム、証明書を削除。`-y`で確認を省略）。
 
 ### 確認方法
 
@@ -63,13 +71,43 @@ https://localhost:8443/items/
 Djangoのポート3333は公開していない（Kongが渡すユーザーヘッダーを信頼するため、Kong以外から直接アクセスさせない）。
 デバッグ時のみ `docker-compose.yml` の `127.0.0.1:3333` を有効化する。
 
+### 製造業向けAPI
+製造業（部品を仕入れて製品を組み立て、顧客/ディーラーへ販売）を想定したリソースを追加：
+品目（`items`、原材料/部品/完成品）、部品構成（`item-components`、BOM）、仕入先（`suppliers`）、
+顧客（`customers`、直販/ディーラー）、発注（`purchase-orders`）、受注（`orders`）、
+出荷（`shipments`）、出荷ステータス（`shipping-statuses`）、出荷スケジュール（`shipping-schedule`）。
+在庫を動かすアクション：`items/{id}/build/`（BOMの部品を消費して製品を生産）、
+`purchase-orders/{id}/receive/`（入荷で在庫加算）、出荷ステータスを`in_transit`にすると受注分の在庫を減算。
+Kongでは新サービス `django-api`（`/api`）に `/mfg`（apikey）と `/oidc/mfg`（Auth0 OIDC）のルートを追加。
+Auth0のAllowed Callback/Logout URLsに `https://localhost:8443/oidc/mfg/` を追加すること。
+詳細は下記英文の「API」「Gateway (Kong Konnect)」を参照。
+
 ### MCP
-Kong AI Gateway 2.2 で全エンドポイントを MCP ツールとして公開（upstream は Kong API Gateway）。`MCP_README.md` を参照。
+Kong AI Gateway 2.2 で全RESTエンドポイント（50ツール）を MCP ツールとして公開。リソースごとに MCP サーバーを分け、
+`/mcp/mfg/<resource>`（例：`/mcp/mfg/items`、`/mcp/mfg/orders`、計9サーバー）で提供（upstream は Kong API Gateway の `/mfg/<resource>`）。
+`kong/ai-gateway.yaml` は `kong/gen_mcp_tools.py` でOpenAPIスキーマから生成する。`MCP_README.md` を参照。
+
+### API Catalog と Dev Portal
+- **API Catalog**：REST API「Manufacturing Management API」（公開用OpenAPI `kong/openapi/manufacturing-api.yaml`、
+  `https://localhost:8443/mfg` + `apikey`）を登録し、Gatewayサービス `django-api` に紐付け。
+- **MCPサーバー**：9つのMCPサーバーもCatalogに登録（`kong/catalog_mcp.py`、AI GatewayのMCPサーバーにリンク）。
+  kongctl未対応のためKonnect APIで登録する。
+- **Dev Portal**：`manufacturing-portal`（`kong/portal.yaml`、kongctl）。メール＋パスワードで開発者登録・ログイン
+  （自動承認）。ホームと「Getting started」は公開。APIリファレンス（Try it付き）とMCPサーバー一覧はログイン後に表示。
+  KonnectにはMCPサーバーをポータルへ公開する機能がないため、MCPサーバーはページ（`kong/portal/mcp-servers.md`）で紹介する。
+- `./start.sh` で作成、`./cleanup.sh` で削除。ポータルURLは `./start.sh` の最後に表示される。
+
+### Context Mesh（Code Mode）
+Kong Context Mesh で API 全体を Code Mode の MCP サーバー1つ（ツール4つ：`list_tools`・`search`・`get_schema`・`execute`）として公開し、
+従来の MCP（AI Gateway、9サーバー・50ツール）とトークン使用量を比較した。Context Mesh は Kong Operator で作る
+Kubernetes 上のコントロールプレーンが必要なため、minikube で別途構築する（`context-mesh/setup.sh`）。
+結果（Sonnet、1回）：入力トークンは全タスクで 60〜86% 減。300件超の受注を集計するタスクでは入力 −67%・出力 −79%・コスト −85%。
+詳細は [context-mesh/README.md](context-mesh/README.md)。フロー図（ステップ再生あり）：[docs/context-mesh-flow-v4.html](docs/context-mesh-flow-v4.html)（旧版 [v3](docs/context-mesh-flow-v3.html)）
 
 詳しくは、下記の英文説明を参照。（Claude謹製）
 
 
-# Inventory Management API (Django + DRF)
+# Manufacturing Management API (Django + DRF)
 
 A small inventory management REST API, meant to sit behind Kong Konnect
 (see `kong/README-kong.md`). Users authenticate at the gateway via OIDC;
@@ -164,6 +202,43 @@ password.
 | PUT/PATCH | `/api/items/{id}/` | Update an item                |
 | DELETE | `/api/items/{id}/`  | Delete an item                  |
 
+### Manufacturing resources
+
+The API models a manufacturer that buys parts from suppliers, builds
+products from them, and sells to customers and dealers. Each resource below
+has the standard list/create (`/api/<resource>/`) and
+retrieve/PUT/PATCH/DELETE (`/api/<resource>/{id}/`) endpoints, plus the
+listed extras. List endpoints take the filters shown as query parameters.
+
+| Resource | Path | Filters | Notes |
+|---|---|---|---|
+| Items (products/parts) | `/api/items/` | `item_type`, `category` | `item_type`: `raw_material`, `component`, `finished_good` |
+| Item components (BOM) | `/api/item-components/` | `parent`, `component` | Building one `parent` uses `quantity` of `component` |
+| Suppliers | `/api/suppliers/` | `is_active` | |
+| Customers / dealers | `/api/customers/` | `customer_type`, `is_active` | `customer_type`: `direct` or `dealer` |
+| Purchase orders | `/api/purchase-orders/` | `supplier`, `status` | Nested `lines` (item, quantity, unit_cost); read-only `total` |
+| Sales orders | `/api/orders/` | `customer`, `status` | Nested `lines`; line `unit_price` defaults to the item price |
+| Shipments | `/api/shipments/` | `order`, `status` | One shipment ships the whole order. `status` is read-only here |
+| Shipping statuses | `/api/shipping-statuses/` | `shipment`, `status` | Status history. List/get/create only |
+| Shipping schedule | `GET /api/shipping-schedule/` | `ship_from`, `ship_to`, `status`, `carrier` | Shipments with a scheduled ship date, earliest first |
+
+Sending `lines` when updating an order or purchase order replaces all of its lines.
+
+These actions change stock. Each runs in one transaction and returns `409`
+without changing anything if stock is short or the state doesn't allow it:
+
+| Method | Path | Effect |
+|---|---|---|
+| POST | `/api/items/{id}/build/` `{"quantity": n}` | Uses up the item's BOM components times `n`, then adds `n` to the item |
+| POST | `/api/purchase-orders/{id}/receive/` | Adds received goods to stock. Body `{"lines": [{"line_id", "quantity"}]}`, or `{}` to receive everything outstanding. Status becomes `partially_received` or `received` |
+| POST | `/api/orders/{id}/confirm/` | `draft` → `confirmed` |
+| POST | `/api/orders/{id}/cancel/` | Cancels an order that hasn't shipped |
+| POST | `/api/shipping-statuses/` `{"shipment", "status"}` | Records the status and moves the shipment to it. The first `in_transit` takes the order lines out of stock and sets the order to `shipped`. `delivered` sets the order to `delivered` |
+
+`seed_demo` adds sample data: a "Desk Workstation Bundle" (`FG-2001`) with
+a 5-part BOM, two suppliers, a dealer and a direct customer, a submitted
+purchase order, and a confirmed sales order with a scheduled shipment.
+
 ### Example
 
 ```bash
@@ -214,14 +289,33 @@ real browser is involved there.
 ## Gateway (Kong Konnect)
 
 `kong/kong.yaml` (decK, control plane `django-apigw`) exposes the items API
-on two routes of the same service. Both inject Django Basic auth with DataKit.
+on the `django-api-items` service (`/api/items`) and the whole API on the
+`django-api` service (`/api`). Every API route injects Django Basic auth
+with DataKit.
 
 | Route                     | Client auth                                        |
 |---------------------------|----------------------------------------------------|
 | `/inventory/...`          | `apikey` header (key-auth); also used by the MCP server |
 | `/oidc/inventory/...`     | Auth0 OIDC: browser session cookie, Bearer JWT, or client_credentials |
+| `/mfg/<resource>/...`     | `apikey` header (key-auth). Whole API, e.g. `/mfg/suppliers/` → `/api/suppliers/`. Upstream of the MCP server |
+| `/oidc/mfg/<resource>/...` | Auth0 OIDC, same as `/oidc/inventory` (browser and M2M), per-user rate limit |
 | `/items/...`              | Auth0 OIDC browser login (shared session). Django web UI logged in as the Auth0 user |
 | `/static/...`             | None. Django/DRF CSS, JS, and images (whitenoise), needed by the browsable API pages |
+
+Links and redirects use the client-facing URL. Kong strips the route path
+and prepends the service path, e.g. `https://localhost:8443/oidc/mfg/orders`
+→ `http://django:3333/api/orders`. `KongForwardedMiddleware`
+(`inventory/gateway.py`) reads Kong's `X-Forwarded-Host/Port/Proto/Prefix/Path`
+headers so that DRF's API root links, the browsable API breadcrumbs and
+trailing-slash redirects point at `https://localhost:8443/oidc/mfg/...` (or
+`/mfg/...`), not `django:3333` or `/api/...`.
+
+Interactive diagram of every auth flow (browser, web UI, Bearer JWT,
+client_credentials, apikey, MCP client), with step-by-step playback and
+components grouped by where they run:
+[docs/auth-flow-v3.html](docs/auth-flow-v3.html). Open it in a browser.
+Earlier versions: [v2](docs/auth-flow-v2.html) and the items-only
+[v1](docs/auth-flow.html).
 
 See `kong/README-kong.md` for topology notes.
 
@@ -348,8 +442,8 @@ In the Auth0 dashboard (https://manage.auth0.com):
 
 2. **Create the browser app** (Applications > Applications > Create Application >
    *Regular Web Applications*), then under **Settings**:
-   - Allowed Callback URLs: `https://localhost:8443/oidc/inventory/`
-   - Allowed Logout URLs: `https://localhost:8443/oidc/inventory/`
+   - Allowed Callback URLs: `https://localhost:8443/oidc/inventory/, https://localhost:8443/oidc/mfg/`
+   - Allowed Logout URLs: `https://localhost:8443/oidc/inventory/, https://localhost:8443/oidc/mfg/`
    - Allowed Web Origins: `https://localhost:8443`
    - Save. Note the **Client ID** and **Client Secret**.
    - Advanced Settings > Grant Types: *Authorization Code* and *Refresh Token* are enabled.
@@ -627,6 +721,60 @@ Notes:
 
 ## MCP server (Kong AI Gateway 2.2)
 
-`kong/ai-gateway.yaml` exposes every item endpoint as an MCP tool at
-`/mcp/inventory` on a Kong AI Gateway 2.2 data plane, which uses this
-Kong Gateway as its upstream. See `MCP_README.md`.
+`kong/ai-gateway.yaml` exposes every REST endpoint as an MCP tool on a
+Kong AI Gateway 2.2 data plane, with one MCP server per resource at
+`/mcp/mfg/<resource>` (e.g. `/mcp/mfg/items`, `/mcp/mfg/orders`). The AI
+Gateway uses this Kong Gateway as its upstream. See `MCP_README.md`.
+
+## Context Mesh: Code Mode vs conventional MCP
+
+`context-mesh/` sets up Kong Context Mesh with one Code Mode MCP server for
+the whole API (4 tools instead of 50) and compares its token usage with the
+conventional AI Gateway MCP servers. Code Mode used 60–86% fewer input
+tokens on every task, and 85% less cost on a 301-order aggregation. See
+[context-mesh/README.md](context-mesh/README.md), and the interactive flow
+diagram [docs/context-mesh-flow-v4.html](docs/context-mesh-flow-v4.html)
+(setup, a Code Mode call, the same call over conventional MCP, and the token
+results, with step-by-step playback).
+
+## API Catalog and Dev Portal (Konnect)
+
+`./start.sh` puts the API and the MCP servers in the Konnect Catalog and
+publishes them on a Dev Portal with developer login. `./cleanup.sh` removes
+them again.
+
+| What | Where | Managed by |
+|---|---|---|
+| Catalog API "Manufacturing Management API" (slug `manufacturing-api`) | spec `kong/openapi/manufacturing-api.yaml` | `kong/portal.yaml` (kongctl) |
+| Dev Portal `manufacturing-portal` with pages | `kong/portal/*.md` | `kong/portal.yaml` (kongctl) |
+| 9 Catalog MCP servers `mfg-<resource>-mcp` | tools copied from the AI Gateway | `kong/catalog_mcp.py` (Konnect API) |
+
+- **API.** The published spec is the API as developers call it: server
+  `https://localhost:8443/mfg`, `apikey` header auth, no `/api/auth` or
+  `/api/schema` endpoints. The API's implementation is the `django-api`
+  Gateway Service on `django-apigw`. The publication is private, so only
+  logged-in developers see it.
+- **Login.** Developers sign up with email and password at `/register`, and
+  are approved automatically. Home and Getting started are public. The API
+  reference and the MCP servers page need a login.
+- **Try it.** The API reference calls `https://localhost:8443/mfg` from the
+  browser. A `cors` plugin on `django-route-mfg` allows `*.us.kongportals.com`
+  origins and answers the preflight. Accept the gateway's self-signed
+  certificate once by opening `https://localhost:8443` first. Calls still use
+  the shared demo key `test`; there's no app registration.
+- **MCP servers.** Each Catalog MCP server holds the tools the AI Gateway
+  actually serves (from `tools/list`), a streamable-http remote and a link to
+  the AI Gateway MCP server. Konnect can't publish MCP servers to a portal, so
+  the portal lists them on its MCP servers page. A Catalog MCP server keeps one
+  immutable version, so `kong/catalog_mcp.py` recreates the entry when the
+  tools change.
+- **Generated files.** `kong/gen_mcp_tools.py` writes `kong/ai-gateway.yaml`,
+  `kong/openapi/manufacturing-api.yaml` and `kong/portal/mcp-servers.md` from
+  the Django schema. After an API change, run it, then `./start.sh`, or apply
+  the three steps by hand:
+
+```bash
+.venv/bin/python kong/gen_mcp_tools.py
+kongctl apply -f kong/ai-gateway.yaml -f kong/portal.yaml --pat "$(cat ~/.kong/kpat)"
+.venv/bin/python kong/catalog_mcp.py
+```

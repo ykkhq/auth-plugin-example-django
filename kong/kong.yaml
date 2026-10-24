@@ -319,6 +319,119 @@ plugins:
   - http
   - https
   route: django-route-static
+# --- Manufacturing API (django-api service, Django /api/*): the same three
+# auth paths as items, one level up so every resource is reachable:
+#   /mfg/<resource>/       apikey  -> Basic  (MCP server upstream)
+#   /oidc/mfg/<resource>/  browser (Auth0 session) or app (Bearer/client_credentials)
+- config: *basic_auth_datakit
+  enabled: true
+  instance_name: mfg-create-basic-auth
+  name: datakit
+  protocols:
+  - http
+  - https
+  route: django-route-mfg
+- enabled: true
+  instance_name: mfg-keyauth
+  name: key-auth
+  protocols:
+  - http
+  - https
+  route: django-route-mfg
+# Dev Portal "try it": the browser calls /mfg from the portal's origin
+# (*.us.kongportals.com, kong/portal.yaml). cors answers the OPTIONS preflight
+# itself (it runs before key-auth), so preflights need no apikey.
+- config:
+    origins:
+    - "https://.*\\.us\\.kongportals\\.com"
+    methods:
+    - GET
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+    - OPTIONS
+    headers:
+    - apikey
+    - Content-Type
+    - Accept
+    max_age: 3600
+  enabled: true
+  instance_name: mfg-portal-cors
+  name: cors
+  protocols:
+  - http
+  - https
+  route: django-route-mfg
+- config:
+    remove:
+      headers:
+      - X-Authenticated-User
+  enabled: true
+  instance_name: strip-identity-mfg
+  name: request-transformer
+  protocols:
+  - http
+  - https
+  route: django-route-mfg
+- config:
+    <<: *auth0_oidc_config
+    redirect_uri:
+    - https://localhost:8443/oidc/mfg/
+    logout_redirect_uri:
+    - https://localhost:8443/oidc/mfg/
+  enabled: true
+  instance_name: auth0-oidc-mfg
+  name: openid-connect
+  protocols:
+  - http
+  - https
+  route: django-route-mfg-oidc
+- config: *basic_auth_datakit
+  enabled: true
+  instance_name: oidc-mfg-create-basic-auth
+  name: datakit
+  protocols:
+  - http
+  - https
+  route: django-route-mfg-oidc
+- config: *per_user_rate_limit
+  enabled: true
+  instance_name: oidc-mfg-rate-limit-browser
+  name: rate-limiting
+  protocols:
+  - http
+  - https
+  route: django-route-mfg-oidc
+- config:
+    <<: *auth0_oidc_config
+    auth_methods:
+    - bearer
+    - client_credentials
+    scopes: []
+  enabled: true
+  instance_name: auth0-oidc-mfg-m2m
+  name: openid-connect
+  protocols:
+  - http
+  - https
+  route: django-route-mfg-oidc-m2m
+- config: *basic_auth_datakit
+  enabled: true
+  instance_name: oidc-mfg-m2m-create-basic-auth
+  name: datakit
+  protocols:
+  - http
+  - https
+  route: django-route-mfg-oidc-m2m
+- config: *per_user_rate_limit
+  enabled: true
+  instance_name: oidc-mfg-rate-limit-m2m
+  name: rate-limiting
+  protocols:
+  - http
+  - https
+  route: django-route-mfg-oidc-m2m
 # --- Monitoring (monitoring/, Grafana) -----------------------------------
 # Global: per-route request / status / latency / bandwidth metrics, served on
 # the DP status API and exposed to Prometheus via the kong-metrics route.
@@ -398,6 +511,47 @@ services:
     name: django-route-items-oidc-m2m
     paths:
     - /oidc/inventory
+    protocols:
+    - https
+# Whole Django REST API (items, item-components, suppliers, customers,
+# purchase-orders, orders, shipments, shipping-statuses, shipping-schedule).
+# /mfg/suppliers/ -> /api/suppliers/. django-api-items above stays for the
+# original /inventory and /oidc/inventory paths.
+- host: django
+  name: django-api
+  path: /api
+  port: 3333
+  routes:
+  - methods:
+    - GET
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+    - OPTIONS   # CORS preflight from the Dev Portal
+    name: django-route-mfg
+    paths:
+    - /mfg
+    protocols:
+    - https
+  - methods: &api_methods
+    - GET
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+    name: django-route-mfg-oidc
+    paths:
+    - /oidc/mfg
+    protocols:
+    - https
+  - headers:
+      Authorization:
+      - "~*^(Bearer|Basic) "
+    methods: *api_methods
+    name: django-route-mfg-oidc-m2m
+    paths:
+    - /oidc/mfg
     protocols:
     - https
 # Django static assets (DRF browsable API / admin CSS, JS, images), served by

@@ -9,9 +9,13 @@ cookies.txt
 *.log
 .env
 
-# AI Gateway DP client cert/key
+# Kong GW / AI Gateway DP client cert/key
+kong/gw-certs/
 kong/ai-certs/
 kong/tls/
 
 # Auth0 / OIDC secrets (template: kong/auth0.env.example)
 kong/auth0.env
+
+# AI Gateway MCP user keys (kong/ai-gateway-billing.yaml)
+kong/mcp-users.env

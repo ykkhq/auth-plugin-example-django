@@ -1,13 +1,51 @@
 {% extends "inventory/base.html" %}
 {% block title %}{% if object %}Edit{% else %}Add{% endif %} Item{% endblock %}
 {% block content %}
-<div class="card">
+<div class="card card-wide">
   <h2>{% if object %}Edit{% else %}Add{% endif %} Item</h2>
   <form method="post">
     {% csrf_token %}
     {{ form.as_p }}
+
+    <h3>Sub components</h3>
+    {{ formset.management_form }}
+    {{ formset.non_form_errors }}
+    <table class="components">
+      <thead>
+        <tr><th>Component</th><th>Qty</th><th>Notes</th><th>Remove</th></tr>
+      </thead>
+      <tbody id="component-rows">
+        {% for f in formset %}
+        <tr>
+          <td>{{ f.id }}{{ f.component }}{{ f.component.errors }}{{ f.non_field_errors }}</td>
+          <td>{{ f.quantity }}{{ f.quantity.errors }}</td>
+          <td>{{ f.notes }}{{ f.notes.errors }}</td>
+          <td>{% if f.instance.pk %}{{ f.DELETE }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <template id="component-template">
+      <tr>
+        <td>{{ formset.empty_form.id }}{{ formset.empty_form.component }}</td>
+        <td>{{ formset.empty_form.quantity }}</td>
+        <td>{{ formset.empty_form.notes }}</td>
+        <td></td>
+      </tr>
+    </template>
+    <p><button class="btn btn-secondary" type="button" id="add-component">+ Add sub component</button></p>
+
     <button class="btn btn-primary" type="submit">Save</button>
     <a class="btn btn-secondary" href="{% url 'item-list' %}">Cancel</a>
   </form>
 </div>
+<script>
+  // Append a blank formset row: the template uses the __prefix__ placeholder.
+  document.getElementById("add-component").addEventListener("click", function () {
+    var total = document.getElementById("id_{{ formset.prefix }}-TOTAL_FORMS");
+    var html = document.getElementById("component-template").innerHTML.replace(/__prefix__/g, total.value);
+    document.getElementById("component-rows").insertAdjacentHTML("beforeend", html);
+    total.value = parseInt(total.value, 10) + 1;
+  });
+</script>
 {% endblock %}

@@ -1,0 +1,118 @@
+# Per-user metering and billing of MCP usage on the AI Gateway "django-ai-gw".
+# Applied BEFORE kong/ai-gateway.yaml, whose MCP servers name mcp-key-auth
+# below in access.auth_strategies (./start.sh does both):
+#   set -a; source kong/mcp-users.env; set +a
+#   METERING_API_TOKEN="$(cat ~/.kong/kpat)" \
+#     kongctl apply -f kong/ai-gateway-billing.yaml --pat "$(cat ~/.kong/kpat)"
+#
+#   MCP client --apikey (per user)--> AI GW  key-auth -> consumer mcp-alice/bob/carol/user1
+#                                            metering-and-billing: 1 event per request,
+#                                              subject = consumer:<id> -> Konnect billing
+#              --apikey (shared, tools[].headers)--> Kong GW :8443/mfg/... (consumer user1)
+#
+# Billing catalog (meter/feature/plan/customers/subscriptions) is OpenMeter
+# state, not kongctl: see kong/mcp_billing.py.
+ai_gateway_config_stores:
+  - ref: mcp-billing-store
+    ai_gateway: !lookup {name: django-ai-gw}
+    name: mcp-billing-store
+    display_name: mcp-billing-secrets
+    secrets:
+      - ref: mcp-billing-metering-token
+        ai_gateway_config_store: !ref mcp-billing-store
+        key: metering-api-token
+        value: !secret {source: !env METERING_API_TOKEN}
+
+ai_gateway_vaults:
+  - ref: mcp-billing-vault
+    ai_gateway: !lookup {name: django-ai-gw}
+    name: mcpbilling
+    description: Konnect config store holding the metering ingest token
+    type: konnect
+    config:
+      config_store_id: !ref mcp-billing-store#id
+
+ai_gateway_auth_strategies:
+  - ref: mcp-key-auth
+    ai_gateway: !lookup {name: django-ai-gw}
+    name: mcp-key-auth
+    display_name: MCP user API key
+    type: key-auth
+    config:
+      key_names:
+        - apikey
+      key_in_header: true
+      # the user's key stops here; each MCP tool sends Kong GW's own key
+      # (tools[].headers, set by kong/gen_mcp_tools.py)
+      hide_credentials: true
+
+ai_gateway_consumers:
+  - ref: mcp-alice
+    ai_gateway: !lookup {name: django-ai-gw}
+    name: mcp-alice
+    type: api-key
+    display_name: Alice (MCP demo user)
+    credentials:
+      - ref: mcp-alice-key
+        ai_gateway_consumer: !ref mcp-alice
+        name: mcp-alice-key
+        type: api-key
+        display_name: Alice API key
+        api_key: !secret {source: !env MCP_KEY_ALICE}
+  - ref: mcp-bob
+    ai_gateway: !lookup {name: django-ai-gw}
+    name: mcp-bob
+    type: api-key
+    display_name: Bob (MCP demo user)
+    credentials:
+      - ref: mcp-bob-key
+        ai_gateway_consumer: !ref mcp-bob
+        name: mcp-bob-key
+        type: api-key
+        display_name: Bob API key
+        api_key: !secret {source: !env MCP_KEY_BOB}
+  - ref: mcp-carol
+    ai_gateway: !lookup {name: django-ai-gw}
+    name: mcp-carol
+    type: api-key
+    display_name: Carol (MCP demo user)
+    credentials:
+      - ref: mcp-carol-key
+        ai_gateway_consumer: !ref mcp-carol
+        name: mcp-carol-key
+        type: api-key
+        display_name: Carol API key
+        api_key: !secret {source: !env MCP_KEY_CAROL}
+  # Keeps the existing demo key "test" (start.sh, catalog_mcp.py, context-mesh)
+  # working. Metered as subject "user1", which has no billing customer.
+  - ref: mcp-user1
+    ai_gateway: !lookup {name: django-ai-gw}
+    name: user1
+    type: api-key
+    display_name: user1 (demo key "test", not billed)
+    credentials:
+      - ref: mcp-user1-key
+        ai_gateway_consumer: !ref mcp-user1
+        name: user1-key
+        type: api-key
+        display_name: user1 demo key
+        api_key: !secret {source: !env MCP_KEY_USER1}
+
+ai_gateway_policies:
+  - ref: mcp-metering
+    ai_gateway: !lookup {name: django-ai-gw}
+    name: mcp-metering
+    type: metering-and-billing
+    display_name: Meter MCP requests per user
+    enabled: true
+    global: true
+    config:
+      ingest_endpoint: https://us.api.konghq.com/v3/openmeter/events
+      api_token: "{vault://mcpbilling/metering-api-token}"
+      ssl_verify: true
+      # bills the authenticated consumer; the event subject is
+      # "consumer:<consumer id>" (no consumer field option changes that)
+      subject:
+        look_up_value_in: consumer
+      meter_api_requests: true
+      meter_ai_token_usage: false

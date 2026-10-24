@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'drf_spectacular',
+    'django_filters',
     'inventory',
 ]
 
@@ -55,16 +56,27 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],
 }
 
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'Inventory Management API',
-    'DESCRIPTION': 'Simple inventory management REST API, authenticated via session cookie or HTTP Basic Auth (see README.md).',
+    'TITLE': 'Manufacturing Management API',
+    'DESCRIPTION': 'Manufacturing REST API: items and bills of materials, suppliers and purchase orders, customers/dealers, sales orders, shipments and shipping schedule. Authenticated via session cookie or HTTP Basic Auth (see README.md).',
+    # Separate request/response schemas, so read-only fields stay out of MCP tool inputs.
+    'COMPONENT_SPLIT_REQUEST': True,
+    'ENUM_GENERATE_CHOICE_DESCRIPTION': False,
+    'ENUM_NAME_OVERRIDES': {
+        'PurchaseOrderStatusEnum': 'inventory.models.PurchaseOrder.Status',
+        'OrderStatusEnum': 'inventory.models.Order.Status',
+        'ShippingStatusEnum': 'inventory.models.ShippingStatus',
+    },
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
 }
 
 MIDDLEWARE = [
+    # Public host and path prefix from Kong's X-Forwarded-* headers (inventory/gateway.py)
+    'inventory.gateway.KongForwardedMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -100,6 +112,12 @@ AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.RemoteUserBackend',
     'django.contrib.auth.backends.ModelBackend',
 ]
+
+# Behind Kong: build absolute URLs with the client-facing scheme and host
+# (https://localhost:8443), not django:3333. Safe only because Django is
+# reachable solely from Kong, which overwrites client-sent X-Forwarded-*.
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # The browser posts UI forms to Kong's origin, not Django's own host.
 CSRF_TRUSTED_ORIGINS = os.environ.get('CSRF_TRUSTED_ORIGINS', 'https://localhost:8443').split(',')

@@ -1,0 +1,62 @@
+# In-cluster bridge from the Context Mesh MCP server to the Docker Kong Gateway.
+# The Context Mesh runtime verifies upstream TLS and can't be given our private
+# CA, so it calls http://mfg-gateway.default.svc/mfg (cluster-internal only)
+# and nginx calls https://host.minikube.internal:8443/mfg with full
+# verification: the private CA (ConfigMap mfg-gateway-ca, from kong/tls/ca.crt)
+# and SNI host.docker.internal, the name Kong's server cert is issued for.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mfg-gateway-nginx
+  namespace: default
+data:
+  default.conf: |
+    server {
+      listen 8080;
+      location /mfg/ {
+        proxy_pass https://host.minikube.internal:8443;
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/nginx/ca/ca.crt;
+        proxy_ssl_server_name on;
+        proxy_ssl_name host.docker.internal;
+        proxy_set_header Host host.docker.internal:8443;
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mfg-gateway
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: mfg-gateway}
+  template:
+    metadata:
+      labels: {app: mfg-gateway}
+    spec:
+      containers:
+      - name: nginx
+        image: nginxinc/nginx-unprivileged:1.27-alpine
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - {name: conf, mountPath: /etc/nginx/conf.d}
+        - {name: ca, mountPath: /etc/nginx/ca}
+      volumes:
+      - name: conf
+        configMap: {name: mfg-gateway-nginx}
+      - name: ca
+        configMap: {name: mfg-gateway-ca}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mfg-gateway
+  namespace: default
+spec:
+  selector: {app: mfg-gateway}
+  ports:
+  - port: 80
+    targetPort: 8080
