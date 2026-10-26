@@ -1,0 +1,895 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manufacturing Auth Flows v4</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #ffffff;
+  --dot: #d4d4d8;
+  --node: #ffffff;
+  --node-b: #e4e4e7;
+  --sel: #1a192b;
+  --text: #18181b;
+  --muted: #71717a;
+  --edge: #b1b1b7;
+  --edge-dim: #e7e7ea;
+  --label-bg: #ffffff;
+  --label-t: #3f3f46;
+  --handle: #1a192b;
+  --panel: #ffffff;
+  --panel-b: #e4e4e7;
+  --chip: #f4f4f5;
+  --group: rgba(244, 244, 245, .6);
+  --group-b: #d4d4d8;
+  --mask: rgba(240, 240, 242, .75);
+  --mini-node: #e4e4e7;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .05), 0 2px 6px rgba(0, 0, 0, .06);
+  --flow: #6366f1;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141414; --dot: #2e2e33; --node: #1e1e20; --node-b: #34343a; --sel: #e4e4e7;
+    --text: #f4f4f5; --muted: #a1a1aa; --edge: #5b5b63; --edge-dim: #26262a;
+    --label-bg: #1e1e20; --label-t: #d4d4d8; --handle: #e4e4e7; --panel: #1e1e20;
+    --panel-b: #34343a; --chip: #2a2a2e; --group: rgba(39, 39, 42, .45); --group-b: #3f3f46;
+    --mask: rgba(20, 20, 20, .75); --mini-node: #3f3f46;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 2px 8px rgba(0, 0, 0, .35);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141414; --dot: #2e2e33; --node: #1e1e20; --node-b: #34343a; --sel: #e4e4e7;
+  --text: #f4f4f5; --muted: #a1a1aa; --edge: #5b5b63; --edge-dim: #26262a;
+  --label-bg: #1e1e20; --label-t: #d4d4d8; --handle: #e4e4e7; --panel: #1e1e20;
+  --panel-b: #34343a; --chip: #2a2a2e; --group: rgba(39, 39, 42, .45); --group-b: #3f3f46;
+  --mask: rgba(20, 20, 20, .75); --mini-node: #3f3f46;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 2px 8px rgba(0, 0, 0, .35);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow: hidden;
+}
+code, .mono { font-family: var(--mono); }
+
+/* ---------- canvas ---------- */
+#flow {
+  position: fixed; inset: 0;
+  background-color: var(--bg);
+  background-image: radial-gradient(circle, var(--dot) 1px, transparent 1.2px);
+  background-size: 20px 20px;
+  touch-action: none;
+  cursor: default;
+}
+#flow.panning { cursor: grabbing; }
+#vp { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.layer { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+#groups, #nodes { position: absolute; left: 0; top: 0; }
+
+/* ---------- nodes ---------- */
+.node {
+  position: absolute; left: 0; top: 0;
+  background: var(--node);
+  border: 1px solid var(--node-b);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  cursor: grab;
+  user-select: none;
+  transition: opacity .25s, border-color .2s, box-shadow .2s;
+}
+.node.dragging { cursor: grabbing; }
+.node.sel { border-color: var(--sel); box-shadow: 0 0 0 1px var(--sel), var(--shadow); }
+.node.dim { opacity: .32; }
+.node.on { border-color: color-mix(in srgb, var(--flow) 55%, var(--node-b)); }
+.hd { display: flex; gap: 10px; align-items: center; padding: 10px 12px; }
+.ic {
+  width: 30px; height: 30px; flex: none;
+  border-radius: 8px; display: grid; place-items: center;
+  background: var(--chip); color: var(--muted);
+}
+.ti { font-weight: 600; font-size: 13px; letter-spacing: -.01em; }
+.ti.mono { font-size: 12.5px; font-weight: 500; }
+.su { color: var(--muted); font-size: 11px; font-family: var(--mono); }
+.body { border-top: 1px solid var(--node-b); padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 5px; }
+.chips { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 2px; }
+.chip {
+  font: 500 10.5px var(--mono);
+  padding: 1px 6px; border-radius: 5px;
+  background: var(--chip); border: 1px solid var(--node-b); color: var(--text);
+}
+.row { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; }
+.row code { font-size: 10.5px; color: var(--text); }
+.row span { color: var(--muted); text-align: right; }
+.group {
+  background: var(--group);
+  border: 1px dashed var(--group-b);
+  border-radius: 14px;
+  box-shadow: none;
+}
+.group .hd { padding: 12px 14px; }
+
+/* ---------- edges ---------- */
+.edge { fill: none; stroke: var(--edge); stroke-width: 1.5; transition: stroke .2s, opacity .2s; }
+.edge.cfg { stroke-dasharray: 4 4; }
+.edge.in { stroke: var(--flow); stroke-dasharray: 5; animation: dash .6s linear infinite; }
+.edge.cur { stroke-width: 2.75; stroke-dasharray: none; animation: none; }
+.edge.dim { stroke: var(--edge-dim); }
+.edge.hl { stroke: var(--sel); stroke-width: 2; }
+@keyframes dash { to { stroke-dashoffset: -10; } }
+.elabel rect { fill: var(--label-bg); stroke: var(--node-b); }
+.elabel text { font: 500 10px Inter, system-ui, sans-serif; fill: var(--label-t); }
+.elabel.dim { opacity: .28; }
+.elabel.cur rect { stroke: var(--flow); }
+.elabel.cur text { fill: var(--flow); font-weight: 600; }
+.handle { fill: var(--handle); stroke: var(--node); stroke-width: 1.5; }
+#dot { fill: var(--flow); }
+#dotRing { fill: var(--flow); opacity: .22; }
+@media (prefers-reduced-motion: reduce) { .edge.in { animation: none; } }
+
+/* ---------- panels ---------- */
+.panel {
+  position: absolute; z-index: 10;
+  background: var(--panel);
+  border: 1px solid var(--panel-b);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+#title { top: 16px; left: 16px; padding: 12px 14px; max-width: calc(100% - 32px); }
+#title h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -.01em; }
+#title p { margin: 2px 0 10px; color: var(--muted); font-size: 11.5px; }
+#tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: 500 12px Inter, system-ui, sans-serif;
+  padding: 5px 9px; border-radius: 7px;
+  border: 1px solid var(--panel-b); background: var(--panel); color: var(--text);
+  cursor: pointer; white-space: nowrap;
+}
+.tab:hover { background: var(--chip); }
+.tab[aria-selected="true"] { border-color: var(--sel); box-shadow: 0 0 0 1px var(--sel); }
+.sw { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+
+#steps {
+  top: 16px; right: 16px; width: 360px;
+  max-height: calc(100% - 196px);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+#steps header { padding: 12px 14px 10px; border-bottom: 1px solid var(--panel-b); }
+#steps header h2 { margin: 0; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+#steps header p { margin: 4px 0 0; color: var(--muted); font-size: 11.5px; }
+#list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1; }
+#list li {
+  display: grid; grid-template-columns: 22px 1fr; gap: 8px;
+  padding: 7px 8px; border-radius: 7px; cursor: pointer;
+}
+#list li:hover { background: var(--chip); }
+#list li.cur { background: color-mix(in srgb, var(--flow) 12%, transparent); }
+#list .n {
+  width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center;
+  font: 600 10px Inter, system-ui, sans-serif;
+  border: 1px solid var(--panel-b); color: var(--muted);
+}
+#list li.cur .n { background: var(--flow); border-color: var(--flow); color: #fff; }
+#list li.done .n { border-color: var(--flow); color: var(--flow); }
+#list b { font-weight: 600; font-size: 12px; display: block; }
+#list code { font-size: 10.5px; color: var(--muted); display: block; word-break: break-word; margin-top: 1px; }
+#list .dir { font: 500 10px Inter, system-ui, sans-serif; color: var(--muted); margin-left: 4px; }
+#list.legend li { grid-template-columns: 14px 1fr; align-items: start; }
+#list.legend .sw { margin-top: 4px; }
+#steps footer {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px; border-top: 1px solid var(--panel-b);
+}
+#steps footer .count { margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.btn {
+  height: 28px; min-width: 28px; padding: 0 8px;
+  display: inline-grid; place-items: center;
+  border: 1px solid var(--panel-b); border-radius: 7px;
+  background: var(--panel); color: var(--text);
+  font: 500 12px Inter, system-ui, sans-serif; cursor: pointer;
+}
+.btn:hover { background: var(--chip); }
+
+#controls { left: 16px; bottom: 16px; display: flex; flex-direction: column; overflow: hidden; }
+#controls button {
+  width: 28px; height: 28px; display: grid; place-items: center;
+  border: 0; border-bottom: 1px solid var(--panel-b);
+  background: var(--panel); color: var(--text); cursor: pointer;
+}
+#controls button:last-child { border-bottom: 0; }
+#controls button:hover { background: var(--chip); }
+
+#minimap { right: 16px; bottom: 16px; width: 220px; height: 150px; overflow: hidden; cursor: pointer; }
+#minimap svg { width: 100%; height: 100%; display: block; }
+#minimap .mn { fill: var(--mini-node); }
+#minimap .mg { fill: none; stroke: var(--mini-node); stroke-dasharray: 6 6; stroke-width: 3; }
+#minimap .mask { fill: var(--mask); fill-rule: evenodd; }
+
+#attrib { position: absolute; right: 16px; bottom: 172px; font-size: 10px; color: var(--muted); z-index: 10; }
+
+@media (max-width: 760px) {
+  #title { right: 16px; }
+  #title p { display: none; }
+  #tabs { flex-wrap: nowrap; overflow-x: auto; }
+  #steps { top: auto; bottom: 16px; left: 16px; right: 16px; width: auto; max-height: 40%; }
+  #minimap, #attrib { display: none; }
+  #controls { bottom: calc(40% + 28px); }
+}
+</style>
+</head>
+<body>
+<div id="flow" aria-label="Authentication flow diagram">
+  <div id="vp">
+    <div id="groups"></div>
+    <svg class="layer" id="edges">
+      <defs>
+        <marker id="m-def" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z" fill="var(--edge)"/></marker>
+        <marker id="m-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z" fill="var(--edge-dim)"/></marker>
+        <marker id="m-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z" fill="var(--flow)"/></marker>
+        <marker id="m-hl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z" fill="var(--sel)"/></marker>
+      </defs>
+    </svg>
+    <div id="nodes"></div>
+    <svg class="layer" id="over">
+      <g id="labels"></g>
+      <g id="handles"></g>
+      <circle id="dotRing" r="10" visibility="hidden"/>
+      <circle id="dot" r="5" visibility="hidden"/>
+    </svg>
+  </div>
+
+  <div class="panel" id="title">
+    <h1>Manufacturing API · auth flows <span style="font-weight:500;color:var(--muted)">v4</span></h1>
+    <p>Kong Gateway 3.16 + AI Gateway 2.2 on Konnect · Auth0 OIDC · Django REST Framework · MCP (apikey + Auth0 user login)</p>
+    <div id="tabs" role="tablist"></div>
+  </div>
+
+  <aside class="panel" id="steps">
+    <header><h2 id="sTitle"></h2><p id="sDesc"></p></header>
+    <ol id="list"></ol>
+    <footer id="sFoot">
+      <button class="btn" id="prev" aria-label="Previous step">‹</button>
+      <button class="btn" id="play" aria-label="Play">▶ Play</button>
+      <button class="btn" id="next" aria-label="Next step">›</button>
+      <span class="count" id="count"></span>
+    </footer>
+  </aside>
+
+  <div class="panel" id="controls">
+    <button id="zin" aria-label="Zoom in"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button id="zout" aria-label="Zoom out"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+    <button id="fit" aria-label="Fit view"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+    <button id="theme" aria-label="Toggle theme"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="panel" id="minimap"><svg id="mini"></svg></div>
+  <div id="attrib">drag nodes · scroll to zoom · ←/→ steps</div>
+</div>
+
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const NS = 'http://www.w3.org/2000/svg';
+
+// ---------------------------------------------------------------- data
+const ICONS = {
+  laptop: '<rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/>',
+  box: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>',
+  browser: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M6.5 6.5h.01M9 6.5h.01"/>',
+  terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 10l3 2.5L7 15M12.5 15H17"/>',
+  sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7z"/>',
+  shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  cpu: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
+  gateway: '<path d="M4 12h16M14 6l6 6-6 6"/><circle cx="5" cy="12" r="2"/>',
+  lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L20 3M16 7l3 3"/>',
+  file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h4"/>',
+  cloud: '<path d="M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.1 11.5 3.3 3.3 0 0 0 7 18z"/>',
+  db: '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>',
+};
+
+const NODES = [
+  // gray boxes, outer before inner; positions of wrap-group children are canvas coordinates
+  { id: 'clients', group: true, x: 0, y: 200, icon: 'laptop', title: 'Clients', sub: 'browser · app · MCP' },
+  { id: 'saas', group: true, layout: 'wrap', icon: 'cloud', title: 'Third-party SaaS', sub: 'identity provider' },
+  { id: 'konnect', group: true, layout: 'wrap', icon: 'cloud', title: 'Kong Konnect (SaaS)', sub: 'control planes · config' },
+  { id: 'docker', group: true, layout: 'wrap', icon: 'box', title: 'Docker · kong-net', sub: 'localhost · Kong Gateway DP + Django' },
+  { id: 'aidp', group: true, layout: 'wrap', icon: 'box', title: 'Docker · AI Gateway DP', sub: 'container django-ai-gw' },
+  { id: 'browser', parent: 'clients', w: 240, icon: 'browser', title: 'Browser', sub: 'DRF browsable API · web UI',
+    rows: [{ k: 'inventory_session', v: 'tokens, encrypted' }, { k: 'sessionid', v: 'Django session' }] },
+  { id: 'app', parent: 'clients', w: 240, icon: 'terminal', title: 'curl / app', sub: 'Auth0 M2M client',
+    rows: [{ k: 'Bearer', v: 'Auth0 JWT' }, { k: 'Basic', v: 'client id:secret' }, { k: 'apikey', v: 'test' }] },
+  { id: 'mcp', parent: 'clients', w: 240, icon: 'sparkle', title: 'MCP client', sub: 'Claude Code · agents',
+    rows: [{ k: 'apikey', v: 'test' }, { k: 'Bearer', v: 'Auth0 user JWT (OAuth 2.1 + PKCE)' }, { k: 'client', v: 'Auth0 Native app · :8765/callback' }] },
+  { id: 'auth0', parent: 'saas', x: 360, y: 0, w: 280, icon: 'shield', tint: '#eb5424', title: 'Auth0', sub: '<tenant>.us.auth0.com',
+    rows: [{ k: 'Web App', v: 'auth code + PKCE' }, { k: 'M2M App', v: 'client_credentials' },
+           { k: 'API', v: 'audience · RS256' }, { k: 'callbacks', v: '/oidc/mfg/ · /oidc/inventory/ · /items/' },
+           { k: 'MCP Native App', v: 'public client · PKCE' }, { k: 'MCP APIs', v: 'aud = MCP resource URL' },
+           { k: 'resource param', v: 'compatibility profile on' }, { k: 'audience param', v: 'set by Kong /authorize (old clients)' }] },
+  { id: 'aigw', parent: 'aidp', x: 360, y: 900, w: 270, icon: 'cpu', title: 'Kong AI Gateway 2.2', sub: ':11443 /mcp/mfg · /mcp-oidc/mfg',
+    chips: ['ai-mcp-proxy', 'conversion-listener', 'openid-connect strategy'],
+    rows: [{ k: 'MCP servers', v: '9 apikey + 9 Auth0 · one per resource' }, { k: 'tools', v: '50 · generated from OpenAPI' },
+           { k: '/mcp/mfg', v: 'apikey → Kong GW /mfg' }, { k: '/mcp-oidc/mfg', v: 'JWT → Kong GW /oidc/mfg' }] },
+  { id: 'kong', group: true, parent: 'docker', x: 720, y: 270, icon: 'gateway', title: 'Kong Gateway 3.16', sub: ':8443 · stores no sessions' },
+  { id: 'oidc', parent: 'kong', w: 320, icon: 'lock', tint: '#6366f1', mono: true, title: '/oidc/mfg', sub: 'django-route-mfg-oidc (+ -m2m) → /api',
+    chips: ['openid-connect', 'rate-limiting', 'datakit'],
+    rows: [{ k: 'rate limit', v: '10/min · 200/h per user (sub)' }, { k: 'browser', v: 'authorization_code · session' }, { k: 'apps', v: 'bearer · client_credentials (-m2m route)' },
+           { k: 'session', v: 'idle 15m · roll 1h · abs 8h' }, { k: 'session_storage', v: 'cookie (in the browser)' },
+           { k: 'legacy', v: '/oidc/inventory → /api/items' }] },
+  { id: 'web', parent: 'kong', w: 320, icon: 'browser', tint: '#0ea5e9', mono: true, title: '/items', sub: 'django-route-web',
+    chips: ['openid-connect'],
+    rows: [{ k: 'auth', v: 'authorization_code · session' }, { k: 'session', v: 'shared inventory_session' },
+           { k: 'sets', v: 'X-Authenticated-User = sub' }] },
+  { id: 'key', parent: 'kong', w: 320, icon: 'key', tint: '#ec4899', mono: true, title: '/mfg', sub: 'django-route-mfg → /api',
+    chips: ['key-auth', 'datakit', 'request-transformer'],
+    rows: [{ k: 'consumer', v: 'user1' }, { k: 'strips', v: 'X-Authenticated-User' }, { k: 'legacy', v: '/inventory → /api/items' }] },
+  { id: 'gwmcp', parent: 'kong', w: 320, icon: 'sparkle', tint: '#14b8a6', mono: true, title: '/gw-mcp/mfg', sub: 'django-route-gw-mcp · MCP server (all tools)',
+    chips: ['ai-mcp-proxy listener', 'ai-mcp-oauth2', 'rate-limiting'],
+    rows: [{ k: 'resource', v: 'https://localhost:8443/gw-mcp/mfg' }, { k: 'aud', v: 'must equal resource' },
+           { k: 'metadata', v: '/gw-mcp/mfg/.well-known/oauth-protected-resource' }, { k: 'rate limit', v: '60/min per user (sub)' }] },
+  { id: 'gwtools', parent: 'kong', w: 320, icon: 'lock', tint: '#14b8a6', mono: true, title: '/gw-mcp/tools/<resource>', sub: 'django-route-gw-mcp-<resource> → /api/<resource>',
+    chips: ['ai-mcp-proxy conversion-only', 'openid-connect', 'datakit'],
+    rows: [{ k: 'tools', v: '9 plugins · tag mfg-gw-mcp' }, { k: 'called by', v: 'listener (internal) · same JWT' }, { k: 'no token', v: '401 (closed to direct calls)' }] },
+  { id: 'legacy', parent: 'kong', w: 320, icon: 'key', tint: '#f97316', mono: true, title: '/.well-known/oauth-authorization-server', sub: '+ /register · /authorize · for 2025-03-26 MCP clients',
+    chips: ['datakit exit'],
+    rows: [{ k: 'metadata', v: 'issuer :8443 · token → Auth0' }, { k: '/register', v: 'pre-registered public client' },
+           { k: '/authorize', v: '302 → Auth0 + audience' }] },
+  { id: 'static', parent: 'kong', w: 320, icon: 'file', mono: true, title: '/static', sub: 'django-route-static',
+    chips: ['no auth · GET/HEAD', 'request-transformer'] },
+  { id: 'cp', parent: 'konnect', x: 1200, y: 0, w: 280, icon: 'cloud', title: 'Konnect', sub: 'django-apigw · django-ai-gw',
+    rows: [{ k: 'kongctl', v: 'kong/konnect.yaml (CP, AI GW)' }, { k: 'decK', v: 'kong/kong.yaml' }, { k: 'kongctl', v: 'kong/ai-gateway.yaml (MCP)' }] },
+  { id: 'django', parent: 'docker', x: 1200, y: 420, w: 290, icon: 'db', tint: '#0c4b33', title: 'Django + DRF', sub: 'django:3333 · kong-net only',
+    rows: [{ id: 'webui', k: '/items/', v: 'web UI · RemoteUserBackend' }, { k: 'django_session', v: 'SQLite' },
+           { id: 'api', k: '/api/<resource>/', v: 'Basic auth · 9 resources' }, { id: 'hdr', k: 'X-Authenticated-*', v: 'OIDC identity' },
+           { id: 'fwd', k: 'X-Forwarded-*', v: 'links → https://localhost:8443/…' }, { id: 'st', k: '/static/', v: 'whitenoise' }] },
+];
+
+// s/t = node ids; sh/th = handle side (l r t b) + fraction along it, or a row id
+const EDGES = [
+  { id: 'b_oidc', s: 'browser', sh: { s: 'r', f: .42 }, t: 'oidc', th: { s: 'l', f: .28 }, label: 'HTTPS · session cookie', lt: .45 },
+  { id: 'b_auth0', s: 'browser', sh: { s: 't', f: .6 }, t: 'auth0', th: { s: 'l', f: .5 }, label: 'login redirect', lt: .5 },
+  { id: 'b_web', s: 'browser', sh: { s: 'r', f: .6 }, t: 'web', th: { s: 'l', f: .3 }, label: 'web UI · session cookie', lt: .55 },
+  { id: 'b_static', s: 'browser', sh: { s: 'r', f: .78 }, t: 'static', th: { s: 'l', f: .5 }, label: 'CSS · JS', lt: .93 },
+  { id: 'app_auth0', s: 'app', sh: { s: 'r', f: .18 }, t: 'auth0', th: { s: 'b', f: .3 }, label: '/oauth/token', lt: .55 },
+  { id: 'app_oidc', s: 'app', sh: { s: 'r', f: .4 }, t: 'oidc', th: { s: 'l', f: .7 }, label: 'Bearer · Basic id:secret', lt: .45 },
+  { id: 'app_key', s: 'app', sh: { s: 'r', f: .75 }, t: 'key', th: { s: 'l', f: .4 }, label: 'apikey', lt: .3 },
+  { id: 'mcp_aigw', s: 'mcp', sh: { s: 'r', f: .5 }, t: 'aigw', th: { s: 'l', f: .5 }, label: 'MCP · apikey', lt: .5 },
+  { id: 'aigw_key', s: 'aigw', sh: { s: 'r', f: .4 }, t: 'key', th: { s: 'l', f: .75 }, label: 'REST · apikey', lt: .55 },
+  { id: 'oidc_auth0', s: 'oidc', sh: { s: 't', f: .8 }, t: 'auth0', th: { s: 'r', f: .55 }, label: 'code → token · JWKS', lt: .55 },
+  { id: 'web_auth0', s: 'web', sh: { s: 'l', f: .8 }, t: 'auth0', th: { s: 'b', f: .75 }, label: 'code → token', lt: .35 },
+  { id: 'web_django', s: 'web', sh: { s: 'r', f: .5 }, t: 'django', th: { s: 'l', row: 'webui' }, label: 'X-Authenticated-User', lt: .5 },
+  { id: 'oidc_django', s: 'oidc', sh: { s: 'r', f: .5 }, t: 'django', th: { s: 'l', row: 'hdr' }, label: 'Basic · X-Authenticated-*', lt: .5 },
+  { id: 'key_django', s: 'key', sh: { s: 'r', f: .5 }, t: 'django', th: { s: 'l', row: 'api' }, label: 'Basic', lt: .5 },
+  { id: 'static_django', s: 'static', sh: { s: 'r', f: .5 }, t: 'django', th: { s: 'l', row: 'st' }, label: 'whitenoise', lt: .5 },
+  { id: 'mcp_auth0', s: 'mcp', sh: { s: 't', f: .85 }, t: 'auth0', th: { s: 'l', f: .85 }, label: 'login · PKCE · resource=', lt: .5 },
+  { id: 'mcp_gwmcp', s: 'mcp', sh: { s: 'r', f: .3 }, t: 'gwmcp', th: { s: 'l', f: .35 }, label: 'MCP · Bearer (Auth0 user)', lt: .55 },
+  { id: 'gwmcp_auth0', s: 'gwmcp', sh: { s: 't', f: .6 }, t: 'auth0', th: { s: 'r', f: .85 }, label: 'AS metadata · JWKS', lt: .5 },
+  { id: 'gwmcp_tools', s: 'gwmcp', sh: { s: 'b', f: .5 }, t: 'gwtools', th: { s: 't', f: .5 }, label: 'tool call · same JWT', lt: .5 },
+  { id: 'gwtools_django', s: 'gwtools', sh: { s: 'r', f: .5 }, t: 'django', th: { s: 'l', row: 'hdr' }, label: 'Basic · X-Authenticated-*', lt: .5 },
+  { id: 'mcp_legacy', s: 'mcp', sh: { s: 'r', f: .15 }, t: 'legacy', th: { s: 'l', f: .4 }, label: 'discovery · register · authorize', lt: .6 },
+  { id: 'legacy_auth0', s: 'legacy', sh: { s: 't', f: .3 }, t: 'auth0', th: { s: 'r', f: .95 }, label: '302 + audience', lt: .5 },
+  { id: 'aigw_oidc', s: 'aigw', sh: { s: 'r', f: .2 }, t: 'oidc', th: { s: 'l', f: .9 }, label: 'REST · Bearer (forwarded)', lt: .5 },
+  { id: 'cp_kong', s: 'cp', sh: { s: 'l', f: .5 }, t: 'kong', th: { s: 't', f: .88 }, label: 'config · deck sync', lt: .45, cfg: true },
+  { id: 'cp_aigw', s: 'cp', sh: { s: 'b', f: .2 }, t: 'aigw', th: { s: 'r', f: .75 }, label: 'MCP servers · kongctl', lt: .1, cfg: true },
+];
+
+// d: 1 = request along the edge, -1 = response back
+const FLOWS = {
+  browser: {
+    name: 'Browser · API', color: '#6366f1',
+    desc: 'DRF browsable API on /oidc/mfg: authorization code + PKCE with Auth0. The session (tokens included) is encrypted into the browser cookie; Kong stores nothing. Django builds every link with the public URL.',
+    steps: [
+      { e: 'b_oidc', d: 1, t: 'Request without a session', c: 'GET /oidc/mfg/orders/ — no inventory_session cookie' },
+      { e: 'b_oidc', d: -1, t: 'Kong redirects to Auth0', c: '302 → /authorize?response_type=code&code_challenge=…&audience=…&redirect_uri=https://localhost:8443/oidc/mfg/' },
+      { e: 'b_auth0', d: 1, t: 'User signs in', c: 'Auth0 Universal Login · /oidc/mfg/ must be an Allowed Callback URL of the web app' },
+      { e: 'b_auth0', d: -1, t: 'Auth0 returns the code', c: '302 → https://localhost:8443/oidc/mfg/?code=…&state=…' },
+      { e: 'b_oidc', d: 1, t: 'Callback reaches Kong', c: 'openid-connect checks state + PKCE verifier' },
+      { e: 'oidc_auth0', d: 1, t: 'Code exchanged for tokens', c: 'POST /oauth/token (client_secret_post) · verified via JWKS · aud required' },
+      { e: 'b_oidc', d: -1, t: 'Session cookie issued', c: 'tokens + timeouts encrypted with session_secret into Set-Cookie: inventory_session (Secure; HttpOnly; SameSite=Lax) · lands on the API root /oidc/mfg/' },
+      { e: 'b_oidc', d: 1, t: 'Any resource, by session', c: 'GET /oidc/mfg/orders/ · /oidc/mfg/suppliers/ · … · idle 15 min · rolling 1 h · absolute 8 h' },
+      { e: 'oidc_django', d: 1, t: 'Proxied to Django', c: '/oidc/mfg/orders/ → http://django:3333/api/orders/ · DataKit Authorization: Basic user1 · X-Authenticated-User / -Email' },
+      { e: 'oidc_django', d: -1, t: 'Links use the public URL', c: 'KongForwardedMiddleware reads X-Forwarded-Host/Port/Proto/Prefix/Path → "https://localhost:8443/oidc/mfg/orders/" · /oidc/mfg/orders → 301 /oidc/mfg/orders/' },
+      { e: 'b_static', d: 1, t: 'Page assets', c: 'GET /static/rest_framework/… — public route, no auth' },
+      { e: 'static_django', d: 1, t: 'Served by whitenoise', c: 'Kong /static → Django :3333/static' },
+      { e: 'b_oidc', d: 1, t: 'Logout', c: 'GET /oidc/mfg/logout → Kong drops the session' },
+      { e: 'b_auth0', d: 1, t: 'IdP session ended', c: 'Auth0 end_session → back to https://localhost:8443/oidc/mfg/' },
+    ],
+  },
+  web: {
+    name: 'Browser · web UI', color: '#0ea5e9',
+    desc: "Django web UI on /items: Auth0 login at Kong, then Django's built-in RemoteUserBackend logs in the same user. Only Kong can reach Django (kong-net).",
+    steps: [
+      { e: 'b_web', d: 1, t: 'Open the UI', c: 'GET /items/ — no inventory_session cookie' },
+      { e: 'b_web', d: -1, t: 'Kong redirects to Auth0', c: '302 → /authorize · redirect_uri=https://localhost:8443/items/' },
+      { e: 'b_auth0', d: 1, t: 'User signs in', c: 'Auth0 Universal Login' },
+      { e: 'b_auth0', d: -1, t: 'Auth0 returns the code', c: '302 → /items/?code=…&state=…' },
+      { e: 'b_web', d: 1, t: 'Callback reaches Kong', c: 'openid-connect checks state + PKCE verifier' },
+      { e: 'web_auth0', d: 1, t: 'Code exchanged for tokens', c: 'POST /oauth/token · ID + access token verified via JWKS' },
+      { e: 'b_web', d: -1, t: 'Session cookie issued', c: 'Set-Cookie: inventory_session (tokens encrypted inside) — the same cookie /oidc/mfg accepts, so one login covers both' },
+      { e: 'b_web', d: 1, t: 'Authenticated by session', c: 'Kong decrypts the cookie, no server lookup · idle 15 min · rolling 1 h · absolute 8 h' },
+      { e: 'web_django', d: 1, t: 'Identity forwarded', c: 'X-Authenticated-User = verified sub (overwrites any client value) → http://django:3333 on kong-net' },
+      { e: 'web_django', d: 1, t: 'Django logs the user in', c: 'built-in RemoteUserBackend · user created on first visit · Django sets its own sessionid (django_session, SQLite) · no published port, so only Kong can send this header' },
+      { e: 'web_django', d: -1, t: 'Page rendered', c: 'item list · forms carry Django CSRF token' },
+      { e: 'b_web', d: 1, t: 'Submit a form', c: 'POST /items/add/ · csrfmiddlewaretoken · Origin https://localhost:8443 (CSRF_TRUSTED_ORIGINS)' },
+      { e: 'b_web', d: 1, t: 'Log out', c: 'GET /items/logout → Kong drops the session' },
+      { e: 'b_auth0', d: 1, t: 'IdP session ended', c: 'Auth0 end_session → back to https://localhost:8443/items/' },
+    ],
+  },
+  bearer: {
+    name: 'App · Bearer JWT', color: '#10b981',
+    desc: 'The app gets its own access token from Auth0 and sends it to Kong. A header-matched route (django-route-mfg-oidc-m2m) takes these requests.',
+    steps: [
+      { e: 'app_auth0', d: 1, t: 'Request a token', c: 'POST /oauth/token · grant_type=client_credentials · audience=<API identifier>' },
+      { e: 'app_auth0', d: -1, t: 'JWT access token', c: 'RS256 · aud = API identifier · expires_in 86400' },
+      { e: 'app_oidc', d: 1, t: 'Call the API', c: 'GET /oidc/mfg/orders/ · Authorization: Bearer <JWT> → -m2m route' },
+      { e: 'oidc_auth0', d: 1, t: 'Verify locally', c: 'JWKS (cached) → signature, iss, exp, aud · no per-request call to Auth0' },
+      { e: 'oidc_django', d: 1, t: 'Rate limit, then Django', c: 'rate-limiting by sub: 10/min · 200/h per client (429 when exceeded) · DataKit Basic auth → /api/orders/' },
+      { e: 'app_oidc', d: -1, t: 'Response', c: '200 application/json' },
+    ],
+  },
+  cc: {
+    name: 'App · client_credentials', color: '#f59e0b',
+    desc: 'The app sends its client id/secret to Kong; Kong fetches and caches the token.',
+    steps: [
+      { e: 'app_oidc', d: 1, t: 'Send client credentials', c: 'GET /oidc/mfg/suppliers/ · Authorization: Basic base64(m2m_client_id:secret)' },
+      { e: 'oidc_auth0', d: 1, t: 'Kong requests a token', c: 'POST /oauth/token · client_credentials · audience from the Auth0 tenant Default Audience' },
+      { e: 'oidc_auth0', d: -1, t: 'Token cached', c: 'access_token kept in Kong cache (cache_tokens, salted)' },
+      { e: 'oidc_django', d: 1, t: 'Rate limit, then Django', c: 'rate-limiting by sub: 10/min · 200/h per client (429 when exceeded) · DataKit Basic auth → /api/suppliers/' },
+      { e: 'app_oidc', d: -1, t: 'Response', c: '200 application/json' },
+    ],
+  },
+  apikey: {
+    name: 'App · apikey', color: '#ec4899',
+    desc: 'key-auth route /mfg for every resource: an app or curl calls Kong directly with an API key. DataKit swaps it for Django Basic auth.',
+    steps: [
+      { e: 'app_key', d: 1, t: 'Call with an API key', c: "curl -H 'apikey: test' https://localhost:8443/mfg/orders/" },
+      { e: 'app_key', d: 1, t: 'key-auth', c: 'key test → consumer user1 · request-transformer strips any client-sent X-Authenticated-User' },
+      { e: 'key_django', d: 1, t: 'DataKit → Django', c: 'Authorization: Basic user1 · /mfg/orders/ → http://django:3333/api/orders/' },
+      { e: 'key_django', d: -1, t: 'Django responds', c: '200 JSON · links use https://localhost:8443/mfg/… (X-Forwarded-*)' },
+      { e: 'app_key', d: -1, t: 'Response', c: '200 application/json' },
+    ],
+  },
+  mcp: {
+    name: 'MCP · apikey', color: '#a855f7',
+    desc: 'An MCP client talks to Kong AI Gateway, which has 9 MCP servers, one per resource at /mcp/mfg/<resource>. Each tool call becomes a REST call to the same /mfg key-auth route.',
+    steps: [
+      { e: 'mcp_aigw', d: 1, t: 'Connect to one MCP server', c: 'POST /mcp/mfg/orders · initialize → mcp-session-id · tools/list → 8 order tools' },
+      { e: 'mcp_aigw', d: 1, t: 'MCP tool call', c: 'tools/call create-order · arguments.body = order with nested lines · apikey header' },
+      { e: 'aigw_key', d: 1, t: 'Tool → REST', c: 'POST https://host.docker.internal:8443/mfg/orders/ · apikey forwarded · private CA' },
+      { e: 'key_django', d: 1, t: 'key-auth + DataKit', c: 'consumer user1 · Authorization: Basic → /api/orders/' },
+      { e: 'aigw_key', d: -1, t: 'REST response', c: '201 JSON from Django' },
+      { e: 'mcp_aigw', d: -1, t: 'MCP result', c: 'tools/call result returned to the client' },
+    ],
+  },
+  gwmcp: {
+    name: 'MCP · Kong GW OAuth2', color: '#14b8a6',
+    desc: 'One MCP server with all 50 tools on Kong Gateway 3.16 at /gw-mcp/mfg. ai-mcp-oauth2 makes Kong the OAuth resource server (MCP authorization spec): the client discovers Auth0 from the 401, the user signs in, and the token audience must equal the resource URL. Tool calls re-enter Kong through conversion-only routes that validate the same JWT.',
+    steps: [
+      { e: 'mcp_gwmcp', d: 1, t: 'Connect without a token', c: 'POST /gw-mcp/mfg initialize' },
+      { e: 'mcp_gwmcp', d: -1, t: '401 + resource metadata', c: 'WWW-Authenticate: Bearer resource_metadata="https://localhost:8443/gw-mcp/mfg/.well-known/oauth-protected-resource"' },
+      { e: 'mcp_gwmcp', d: 1, t: 'Read the metadata', c: 'GET …/.well-known/oauth-protected-resource → resource https://localhost:8443/gw-mcp/mfg · authorization_servers [Auth0] · scopes openid profile email' },
+      { e: 'mcp_auth0', d: 1, t: 'User signs in', c: 'browser → /authorize · client_id = MCP Native app · PKCE S256 · resource=https://localhost:8443/gw-mcp/mfg · redirect http://localhost:8765/callback' },
+      { e: 'mcp_auth0', d: -1, t: 'Access token', c: 'code → /oauth/token · RS256 JWT · aud = https://localhost:8443/gw-mcp/mfg (resource parameter compatibility profile) · sub = the user' },
+      { e: 'mcp_gwmcp', d: 1, t: 'MCP with the token', c: 'Authorization: Bearer <JWT> · initialize → mcp-session-id · tools/list → 50 tools from 9 conversion-only plugins (tag mfg-gw-mcp)' },
+      { e: 'gwmcp_auth0', d: 1, t: 'Verify locally', c: 'ai-mcp-oauth2: JWKS (cached) → signature, iss, exp · aud must equal resource (an /oidc/mfg API token is rejected) · rate-limiting 60/min per sub' },
+      { e: 'gwmcp_tools', d: 1, t: 'Tool → REST, inside Kong', c: 'tools/call create-order → POST /gw-mcp/tools/orders/ (internal request) · client headers forwarded · passthrough_credentials keeps the JWT' },
+      { e: 'gwmcp_tools', d: 1, t: 'Same token, checked again', c: 'openid-connect bearer · audience_required = MCP resource · a direct call without a token gets 401' },
+      { e: 'gwtools_django', d: 1, t: 'DataKit → Django', c: 'Authorization: Basic user1 · X-Authenticated-User = sub · → http://django:3333/api/orders/' },
+      { e: 'gwtools_django', d: -1, t: 'REST response', c: '201 JSON from Django' },
+      { e: 'mcp_gwmcp', d: -1, t: 'MCP result', c: 'tools/call result · Kong log user = the Auth0 sub' },
+    ],
+  },
+  aimcp: {
+    name: 'MCP · AI GW OIDC', color: '#8b5cf6',
+    desc: 'The AI Gateway servers with Auth0 login: /mcp-oidc/mfg/<resource>, an openid-connect AI auth strategy plus access.metadata (protected resource metadata). The user token is forwarded to Kong GW /oidc/mfg, which validates it again, so identity and the per-user rate limit hold end to end.',
+    steps: [
+      { e: 'mcp_aigw', d: 1, t: 'Connect without a token', c: 'POST /mcp-oidc/mfg/orders initialize' },
+      { e: 'mcp_aigw', d: -1, t: '401 + resource metadata', c: 'WWW-Authenticate: Bearer resource_metadata="https://localhost:11443/mcp-oidc/mfg/orders/.well-known/oauth-protected-resource" · resource = https://localhost:11443/mcp-oidc/mfg (shared prefix of all 9)' },
+      { e: 'mcp_auth0', d: 1, t: 'User signs in', c: 'MCP Native app · PKCE · resource=https://localhost:11443/mcp-oidc/mfg' },
+      { e: 'mcp_auth0', d: -1, t: 'Access token', c: 'RS256 JWT · aud = https://localhost:11443/mcp-oidc/mfg · one login covers all 9 servers' },
+      { e: 'mcp_aigw', d: 1, t: 'MCP with the token', c: 'Authorization: Bearer <JWT> · strategy mcp-auth0-oidc: JWKS, iss, exp · aud = resource · hide_credentials false' },
+      { e: 'aigw_oidc', d: 1, t: 'Tool → REST with the same JWT', c: 'GET https://host.docker.internal:8443/oidc/mfg/orders/ · Authorization forwarded → header-matched -m2m route' },
+      { e: 'oidc_django', d: 1, t: 'Validated again, then Django', c: 'openid-connect bearer (audience_required includes the MCP audience) · rate-limiting 10/min per sub · DataKit Basic → /api/orders/' },
+      { e: 'aigw_oidc', d: -1, t: 'REST response', c: '200 JSON' },
+      { e: 'mcp_aigw', d: -1, t: 'MCP result', c: 'tools/call result · Kong GW log user = the Auth0 sub' },
+    ],
+  },
+  oldmcp: {
+    name: 'MCP · 2025-03-26 client', color: '#f97316',
+    desc: 'A client on the older MCP spec ignores the resource metadata. It treats the MCP host (https://localhost:8443) as the authorization server, registers dynamically and sends no resource parameter. Kong answers discovery, registration and authorize itself (DataKit) and forces the audience, so the token fits the same /gw-mcp/mfg server.',
+    steps: [
+      { e: 'mcp_gwmcp', d: 1, t: 'Connect without a token', c: 'POST /gw-mcp/mfg initialize' },
+      { e: 'mcp_gwmcp', d: -1, t: '401', c: 'WWW-Authenticate with resource_metadata — ignored by a 2025-03-26 client' },
+      { e: 'mcp_legacy', d: 1, t: 'Authorization server metadata', c: 'path dropped → GET https://localhost:8443/.well-known/oauth-authorization-server' },
+      { e: 'mcp_legacy', d: -1, t: 'Metadata from Kong', c: 'issuer https://localhost:8443 · authorization_endpoint + registration_endpoint = Kong · token_endpoint = Auth0 /oauth/token · S256' },
+      { e: 'mcp_legacy', d: 1, t: 'Dynamic client registration', c: 'POST /register {client_name, redirect_uris}' },
+      { e: 'mcp_legacy', d: -1, t: 'Pre-registered public client', c: '201 · client_id = Auth0 Native app "MCP Client" · token_endpoint_auth_method none · no open DCR on Auth0' },
+      { e: 'mcp_legacy', d: 1, t: 'Authorize via Kong', c: 'browser → GET /authorize?client_id=…&code_challenge=…&redirect_uri=http://localhost:8765/callback (no resource parameter)' },
+      { e: 'legacy_auth0', d: 1, t: 'Redirect with the audience', c: '302 → Auth0 /authorize, same parameters + audience=https://localhost:8443/gw-mcp/mfg · any resource dropped' },
+      { e: 'mcp_auth0', d: 1, t: 'User signs in', c: 'Auth0 checks the redirect_uri against the Native app callbacks' },
+      { e: 'mcp_auth0', d: -1, t: 'Code → token', c: 'POST Auth0 /oauth/token with the PKCE verifier · aud = https://localhost:8443/gw-mcp/mfg' },
+      { e: 'mcp_gwmcp', d: 1, t: 'MCP with the token', c: 'Authorization: Bearer <JWT> · ai-mcp-oauth2 aud check passes · from here on the same as the current-spec flow' },
+      { e: 'gwmcp_tools', d: 1, t: 'Tool → REST', c: 'conversion-only route · openid-connect re-checks the JWT' },
+      { e: 'gwtools_django', d: 1, t: 'DataKit → Django', c: 'Basic user1 · X-Authenticated-User = sub' },
+      { e: 'mcp_gwmcp', d: -1, t: 'MCP result', c: 'tools/call result' },
+    ],
+  },
+  all: { name: 'All', color: '#71717a', desc: 'Every route on one canvas. Pick a flow to step through it.' },
+};
+const ORDER = ['web', 'browser', 'bearer', 'cc', 'apikey', 'mcp', 'gwmcp', 'oldmcp', 'aimcp', 'all'];
+
+const byId = Object.fromEntries(NODES.map(n => [n.id, n]));
+const E = Object.fromEntries(EDGES.map(e => [e.id, e]));
+const state = { x: 0, y: 0, z: 1, flow: 'web', step: 0, playing: false, sel: null, t0: performance.now() };
+
+// ---------------------------------------------------------------- nodes
+const icon = n => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${ICONS[n]}</svg>`;
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+function nodeHTML(n) {
+  let h = `<div class="hd"><div class="ic"${n.tint ? ` style="color:${n.tint}"` : ''}>${icon(n.icon)}</div>
+    <div><div class="ti${n.mono ? ' mono' : ''}">${esc(n.title)}</div><div class="su">${esc(n.sub)}</div></div></div>`;
+  let b = '';
+  if (n.chips) b += `<div class="chips">${n.chips.map(c => `<span class="chip">${esc(c)}</span>`).join('')}</div>`;
+  if (n.rows) b += n.rows.map(r => `<div class="row"${r.id ? ` data-row="${r.id}"` : ''}><code>${esc(r.k)}</code><span>${esc(r.v)}</span></div>`).join('');
+  return b && !n.group ? h + `<div class="body">${b}</div>` : h;
+}
+
+for (const n of NODES) {
+  const el = document.createElement('div');
+  el.className = 'node' + (n.group ? ' group' : '');
+  el.dataset.id = n.id;
+  if (n.w) el.style.width = n.w + 'px';
+  el.innerHTML = nodeHTML(n);
+  (n.group ? $('#groups') : $('#nodes')).appendChild(el);
+  n.el = el;
+}
+// Two kinds of gray group box:
+//  - stack (default): children are stacked vertically inside it
+//  - wrap: children keep the positions given in NODES (canvas coordinates) and
+//    the box is sized around them; it may contain stack groups (nesting)
+const kidsOf = g => NODES.filter(n => n.parent === g.id);
+function fitWrap(g) {
+  const kids = kidsOf(g);
+  if (!g.placed) {  // first layout: children's canvas coordinates -> relative to the box
+    g.x = Math.min(...kids.map(k => k.x)) - 20;
+    g.y = Math.min(...kids.map(k => k.y)) - 64;
+    for (const k of kids) { k.x -= g.x; k.y -= g.y; }
+    g.placed = true;
+  }
+  g.w = Math.max(...kids.map(k => k.x + k.w)) + 20;
+  g.h = Math.max(...kids.map(k => k.y + k.h)) + 20;
+  g.el.style.width = g.w + 'px'; g.el.style.height = g.h + 'px';
+}
+function measure() {
+  for (const n of NODES) if (!n.group) { n.w = n.el.offsetWidth; n.h = n.el.offsetHeight; }
+  for (const g of NODES.filter(n => n.group && n.layout !== 'wrap')) {
+    const kids = kidsOf(g);
+    let y = 64, w = 0;
+    for (const k of kids) { k.x = 20; k.y = y; y += k.h + 34; w = Math.max(w, k.w); }
+    g.w = w + 40; g.h = y - 34 + 20;
+    g.el.style.width = g.w + 'px'; g.el.style.height = g.h + 'px';
+  }
+  for (const g of NODES.filter(n => n.layout === 'wrap')) fitWrap(g);
+}
+measure();
+
+function abs(n) {
+  if (!n.parent) return { x: n.x, y: n.y };
+  const p = abs(byId[n.parent]);
+  return { x: p.x + n.x, y: p.y + n.y };
+}
+function placeNodes() {
+  for (const n of NODES) { const a = abs(n); n.el.style.transform = `translate(${a.x}px,${a.y}px)`; }
+}
+
+// ---------------------------------------------------------------- edges (React Flow bezier)
+function handlePos(id, h) {
+  const n = byId[id], a = abs(n);
+  let f = h.f ?? .5;
+  if (h.row) { const r = n.el.querySelector(`[data-row="${h.row}"]`); f = (r.offsetTop + r.offsetHeight / 2) / n.h; }
+  switch (h.s) {
+    case 'l': return [a.x, a.y + n.h * f];
+    case 'r': return [a.x + n.w, a.y + n.h * f];
+    case 't': return [a.x + n.w * f, a.y];
+    default: return [a.x + n.w * f, a.y + n.h];
+  }
+}
+const off = d => d >= 0 ? .5 * d : 6.25 * Math.sqrt(-d);
+function ctrl(side, [x1, y1], [x2, y2]) {
+  switch (side) {
+    case 'l': return [x1 - off(x1 - x2), y1];
+    case 'r': return [x1 + off(x2 - x1), y1];
+    case 't': return [x1, y1 - off(y1 - y2)];
+    default: return [x1, y1 + off(y2 - y1)];
+  }
+}
+function bez(p0, p1, p2, p3, t) {
+  const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+  return [a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0], a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1]];
+}
+
+const edgesSvg = $('#edges'), labelsG = $('#labels'), handlesG = $('#handles');
+for (const e of EDGES) {
+  e.path = document.createElementNS(NS, 'path');
+  e.path.setAttribute('class', 'edge' + (e.cfg ? ' cfg' : ''));
+  edgesSvg.appendChild(e.path);
+  e.lg = document.createElementNS(NS, 'g');
+  e.lg.setAttribute('class', 'elabel');
+  const r = document.createElementNS(NS, 'rect'), t = document.createElementNS(NS, 'text');
+  t.textContent = e.label; t.setAttribute('dominant-baseline', 'central'); t.setAttribute('text-anchor', 'middle');
+  r.setAttribute('rx', 4); e.lg.append(r, t); labelsG.appendChild(e.lg);
+  e.rect = r; e.text = t;
+}
+function sizeLabels() {
+  for (const e of EDGES) {
+    e.lw = e.text.getBBox().width + 12; e.lh = 18;
+    e.rect.setAttribute('width', e.lw); e.rect.setAttribute('height', e.lh);
+    e.rect.setAttribute('x', -e.lw / 2); e.rect.setAttribute('y', -e.lh / 2);
+  }
+}
+sizeLabels();
+
+function layoutEdges() {
+  handlesG.innerHTML = '';
+  const seen = new Set();
+  for (const e of EDGES) {
+    const s = handlePos(e.s, e.sh), t = handlePos(e.t, e.th);
+    const c1 = ctrl(e.sh.s, s, t), c2 = ctrl(e.th.s, t, s);
+    e.path.setAttribute('d', `M${s} C${c1} ${c2} ${t}`);
+    const [lx, ly] = bez(s, c1, c2, t, e.lt);
+    e.lg.setAttribute('transform', `translate(${lx},${ly})`);
+    for (const p of [s, t]) {
+      const k = p.map(v => v.toFixed(1)).join();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const c = document.createElementNS(NS, 'circle');
+      c.setAttribute('class', 'handle'); c.setAttribute('cx', p[0]); c.setAttribute('cy', p[1]); c.setAttribute('r', 3.5);
+      handlesG.appendChild(c);
+    }
+  }
+}
+
+// ---------------------------------------------------------------- flow state
+function applyFlow() {
+  const f = FLOWS[state.flow];
+  document.documentElement.style.setProperty('--flow', f.color);
+  const inE = new Set((f.steps || []).map(s => s.e));
+  const inN = new Set();
+  inE.forEach(id => { inN.add(E[id].s); inN.add(E[id].t); });
+  for (const id of [...inN]) for (let p = byId[id].parent; p; p = byId[p].parent) inN.add(p);
+  const cur = f.steps ? f.steps[state.step] : null;
+
+  for (const e of EDGES) {
+    const isIn = inE.has(e.id), dim = !!f.steps && !isIn, isCur = cur && cur.e === e.id;
+    const hl = !f.steps && state.sel && (e.s === state.sel || e.t === state.sel);
+    e.path.classList.toggle('in', isIn);
+    e.path.classList.toggle('dim', dim);
+    e.path.classList.toggle('cur', !!isCur);
+    e.path.classList.toggle('hl', !!hl);
+    e.path.setAttribute('marker-end', `url(#m-${isIn ? 'flow' : dim ? 'dim' : hl ? 'hl' : 'def'})`);
+    e.lg.classList.toggle('dim', dim);
+    e.lg.classList.toggle('cur', !!isCur);
+  }
+  for (const n of NODES) {
+    n.el.classList.toggle('dim', !!f.steps && !inN.has(n.id));
+    n.el.classList.toggle('on', !!cur && !n.group && (E[cur.e].s === n.id || E[cur.e].t === n.id));
+    n.el.classList.toggle('sel', state.sel === n.id);
+  }
+  document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', b.dataset.f === state.flow));
+  renderSteps();
+  state.t0 = performance.now();
+}
+
+function renderSteps() {
+  const f = FLOWS[state.flow], list = $('#list');
+  $('#sTitle').innerHTML = `<span class="sw" style="background:${f.color}"></span>${esc(f.name)}`;
+  $('#sDesc').textContent = f.desc;
+  list.innerHTML = '';
+  if (!f.steps) {
+    list.className = 'legend';
+    for (const k of ORDER.slice(0, -1)) {
+      const g = FLOWS[k], li = document.createElement('li');
+      li.innerHTML = `<span class="sw" style="background:${g.color}"></span><div><b>${esc(g.name)}</b><code>${esc(g.desc)}</code></div>`;
+      li.onclick = () => setFlow(k);
+      list.appendChild(li);
+    }
+    $('#sFoot').style.display = 'none';
+    return;
+  }
+  list.className = '';
+  $('#sFoot').style.display = '';
+  f.steps.forEach((s, i) => {
+    const li = document.createElement('li');
+    li.className = i === state.step ? 'cur' : i < state.step ? 'done' : '';
+    li.innerHTML = `<span class="n">${i + 1}</span><div><b>${esc(s.t)}<span class="dir">${s.d < 0 ? '← response' : ''}</span></b><code>${esc(s.c)}</code></div>`;
+    li.onclick = () => { stop(); setStep(i); };
+    list.appendChild(li);
+  });
+  list.children[state.step]?.scrollIntoView({ block: 'nearest' });
+  $('#count').textContent = `${state.step + 1} / ${f.steps.length}`;
+}
+
+function setFlow(k) { stop(); state.flow = k; state.step = 0; state.sel = null; applyFlow(); }
+function setStep(i) {
+  const n = FLOWS[state.flow].steps?.length;
+  if (!n) return;
+  state.step = (i + n) % n;
+  applyFlow();
+}
+let timer = null;
+function play() {
+  state.playing = true; $('#play').textContent = '❚❚ Pause';
+  timer = setInterval(() => setStep(state.step + 1), 2200);
+}
+function stop() { state.playing = false; clearInterval(timer); $('#play').textContent = '▶ Play'; }
+
+const tabs = $('#tabs');
+for (const k of ORDER) {
+  const b = document.createElement('button');
+  b.className = 'tab'; b.dataset.f = k; b.setAttribute('role', 'tab');
+  b.innerHTML = `<span class="sw" style="background:${FLOWS[k].color}"></span>${esc(FLOWS[k].name)}`;
+  b.onclick = () => setFlow(k);
+  tabs.appendChild(b);
+}
+$('#prev').onclick = () => { stop(); setStep(state.step - 1); };
+$('#next').onclick = () => { stop(); setStep(state.step + 1); };
+$('#play').onclick = () => state.playing ? stop() : play();
+addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight') { stop(); setStep(state.step + 1); }
+  if (e.key === 'ArrowLeft') { stop(); setStep(state.step - 1); }
+  if (e.key === ' ' && FLOWS[state.flow].steps) { e.preventDefault(); state.playing ? stop() : play(); }
+});
+
+// moving packet along the current step's edge
+const dot = $('#dot'), ring = $('#dotRing');
+function tick(now) {
+  const f = FLOWS[state.flow], cur = f.steps && f.steps[state.step];
+  if (cur) {
+    const p = E[cur.e].path, len = p.getTotalLength();
+    let t = ((now - state.t0) % 1500) / 1500;
+    t = t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    const pt = p.getPointAtLength(len * (cur.d > 0 ? t : 1 - t));
+    for (const c of [dot, ring]) { c.setAttribute('cx', pt.x); c.setAttribute('cy', pt.y); c.setAttribute('visibility', 'visible'); }
+  } else {
+    dot.setAttribute('visibility', 'hidden'); ring.setAttribute('visibility', 'hidden');
+  }
+  requestAnimationFrame(tick);
+}
+
+// ---------------------------------------------------------------- viewport
+const flow = $('#flow'), vp = $('#vp');
+function applyView() {
+  vp.style.transform = `translate(${state.x}px,${state.y}px) scale(${state.z})`;
+  flow.style.backgroundSize = `${20 * state.z}px ${20 * state.z}px`;
+  flow.style.backgroundPosition = `${state.x}px ${state.y}px`;
+  drawMini();
+}
+function bounds() {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const n of NODES) { const a = abs(n); x0 = Math.min(x0, a.x); y0 = Math.min(y0, a.y); x1 = Math.max(x1, a.x + n.w); y1 = Math.max(y1, a.y + n.h); }
+  return { x0, y0, x1, y1 };
+}
+function fit() {
+  const b = bounds(), W = innerWidth, H = innerHeight, mobile = W <= 760;
+  const L = 16, T = $('#title').offsetHeight + 28;
+  const R = mobile ? W - 16 : W - $('#steps').offsetWidth - 32;
+  const B = mobile ? H - $('#steps').offsetHeight - 28 : H - 16;
+  const aw = R - L, ah = B - T, bw = b.x1 - b.x0, bh = b.y1 - b.y0;
+  const z = Math.max(.2, Math.min(1.1, Math.min(aw / bw, ah / bh) * .96));
+  state.z = z;
+  state.x = L + (aw - bw * z) / 2 - b.x0 * z;
+  state.y = T + (ah - bh * z) / 2 - b.y0 * z;
+  applyView();
+}
+function zoomAt(k, cx, cy) {
+  const nz = Math.max(.2, Math.min(2.2, state.z * k));
+  state.x = cx - (cx - state.x) * (nz / state.z);
+  state.y = cy - (cy - state.y) * (nz / state.z);
+  state.z = nz;
+  applyView();
+}
+flow.addEventListener('wheel', e => {
+  if (e.target.closest('.panel')) return;
+  e.preventDefault();
+  zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? .01 : .0015)), e.clientX, e.clientY);
+}, { passive: false });
+$('#zin').onclick = () => zoomAt(1.2, innerWidth / 2, innerHeight / 2);
+$('#zout').onclick = () => zoomAt(1 / 1.2, innerWidth / 2, innerHeight / 2);
+$('#fit').onclick = fit;
+$('#theme').onclick = () => {
+  const r = document.documentElement;
+  const dark = r.dataset.theme ? r.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  r.dataset.theme = dark ? 'light' : 'dark';
+};
+
+// pan the canvas or drag a node
+let drag = null;
+flow.addEventListener('pointerdown', e => {
+  if (e.target.closest('.panel') || e.button > 0) return;
+  const nodeEl = e.target.closest('.node');
+  drag = { px: e.clientX, py: e.clientY, sx: e.clientX, sy: e.clientY, node: nodeEl ? byId[nodeEl.dataset.id] : null };
+  if (drag.node) nodeEl.classList.add('dragging'); else flow.classList.add('panning');
+  flow.setPointerCapture(e.pointerId);
+});
+flow.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.px, dy = e.clientY - drag.py;
+  drag.px = e.clientX; drag.py = e.clientY;
+  if (drag.node) {
+    drag.node.x += dx / state.z; drag.node.y += dy / state.z;
+    for (const g of NODES.filter(n => n.layout === 'wrap')) fitWrap(g);
+    placeNodes(); layoutEdges(); drawMini();
+  } else {
+    state.x += dx; state.y += dy; applyView();
+  }
+});
+flow.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const moved = Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 3;
+  if (!moved) {
+    state.sel = drag.node && state.sel !== drag.node.id ? drag.node.id : null;
+    if (state.sel && FLOWS[state.flow].steps) { stop(); state.flow = 'all'; }
+    applyFlow();
+  }
+  drag.node?.el.classList.remove('dragging');
+  flow.classList.remove('panning');
+  drag = null;
+});
+
+// ---------------------------------------------------------------- minimap
+const mini = $('#mini');
+function drawMini() {
+  if ($('#minimap').offsetParent === null) return;
+  const b = bounds(), pad = 80;
+  const W = innerWidth, H = innerHeight;
+  const vx = -state.x / state.z, vy = -state.y / state.z, vw = W / state.z, vh = H / state.z;
+  const x0 = Math.min(b.x0 - pad, vx), y0 = Math.min(b.y0 - pad, vy);
+  const x1 = Math.max(b.x1 + pad, vx + vw), y1 = Math.max(b.y1 + pad, vy + vh);
+  mini.setAttribute('viewBox', `${x0} ${y0} ${x1 - x0} ${y1 - y0}`);
+  mini.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  let s = '';
+  for (const n of NODES) {
+    const a = abs(n);
+    s += `<rect class="${n.group ? 'mg' : 'mn'}" x="${a.x}" y="${a.y}" width="${n.w}" height="${n.h}" rx="${n.group ? 14 : 8}"/>`;
+  }
+  const big = 1e5;
+  s += `<path class="mask" d="M${x0 - big},${y0 - big}h${x1 - x0 + 2 * big}v${y1 - y0 + 2 * big}h${-(x1 - x0 + 2 * big)}z M${vx},${vy}h${vw}v${vh}h${-vw}z"/>`;
+  mini.innerHTML = s;
+}
+let miniDrag = false;
+function miniPan(e) {
+  const pt = mini.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+  const w = pt.matrixTransform(mini.getScreenCTM().inverse());
+  state.x = innerWidth / 2 - w.x * state.z;
+  state.y = innerHeight / 2 - w.y * state.z;
+  applyView();
+}
+$('#minimap').addEventListener('pointerdown', e => { miniDrag = true; e.currentTarget.setPointerCapture(e.pointerId); miniPan(e); });
+$('#minimap').addEventListener('pointermove', e => miniDrag && miniPan(e));
+$('#minimap').addEventListener('pointerup', () => miniDrag = false);
+
+// ---------------------------------------------------------------- init
+placeNodes();
+layoutEdges();
+applyFlow();
+fit();
+addEventListener('resize', fit);
+requestAnimationFrame(tick);
+// re-measure once web fonts are in, since node sizes depend on them
+document.fonts?.ready.then(() => { measure(); sizeLabels(); placeNodes(); layoutEdges(); fit(); });
+})();
+</script>
+</body>
+</html>

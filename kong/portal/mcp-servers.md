@@ -25,6 +25,24 @@ same `apikey` header as the REST API (demo key: `test`) over streamable HTTP.
 
 Add only the servers an agent needs, to keep its tool list small.
 
+## Sign in with Auth0 (OIDC) {#oidc}
+
+The same tools are also available with your own Auth0 login instead of an API
+key. The MCP client gets a 401 with OAuth protected-resource metadata, opens the
+Auth0 login in the browser, and sends your access token from then on.
+
+| Server | Endpoint | Tools |
+|---|---|---|
+| All resources in one server (Kong Gateway) | `https://localhost:8443/gw-mcp/mfg` | 50 |
+| One server per resource (AI Gateway) | `https://localhost:11443/mcp-oidc/mfg/<resource>` | as above |
+
+```bash
+claude mcp add --transport http mfg-gw-oidc https://localhost:8443/gw-mcp/mfg \
+  --client-id <MCP client id> --callback-port 8765
+```
+
+Then run `/mcp` in Claude Code and choose **Authenticate**.
+
 ## Manufacturing Customers {#customers}
 
 `https://localhost:11443/mcp/mfg/customers`

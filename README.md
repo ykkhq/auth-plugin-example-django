@@ -7,8 +7,10 @@ OIDC版 (`/oidc/inventory`):
 Browser --(Auth0 OIDCログイン → Kongセッションcookie)--> Kong API gateway (dp) --(basic 認証)--> Django
 curl/アプリ --(Auth0 Bearer JWT または client_credentials)--> Kong API gateway (dp) --(basic 認証)--> Django
 
-認証フローの図（ブラウザで開く、ステップ再生あり）：[docs/auth-flow-v3.html](docs/auth-flow-v3.html)
-（`/oidc/mfg`・`/mfg`・MCP `/mcp/mfg/<resource>` を含む最新版。実行場所ごとにグループ化。旧版は [v2](docs/auth-flow-v2.html)・[v1](docs/auth-flow.html)）
+認証フローの図（ブラウザで開く、ステップ再生あり）：[docs/auth-flow-v4.html](docs/auth-flow-v4.html)
+（`/oidc/mfg`・`/mfg`・MCP `/mcp/mfg/<resource>`、Auth0ログインのMCP `/gw-mcp/mfg`・`/mcp-oidc/mfg/<resource>` を含む最新版。実行場所ごとにグループ化。旧版は [v3](docs/auth-flow-v3.html)・[v2](docs/auth-flow-v2.html)・[v1](docs/auth-flow.html)）
+MCPフローごとの図（そのフローと関係するコンポーネントのみ）：[apikey](docs/mcp-flow-apikey.html) · [Kong GW OAuth2](docs/mcp-flow-kong-gw-oauth2.html) · [2025-03-26 client](docs/mcp-flow-2025-03-26-client.html) · [AI GW OIDC](docs/mcp-flow-ai-gw-oidc.html)
+（`docs/gen_mcp_flow_pages.py` で v4 から生成。v4 を変更したら再実行）
 
 ### 利用Kong Plugin
 - Key auth (`/inventory`)
@@ -86,6 +88,20 @@ Auth0のAllowed Callback/Logout URLsに `https://localhost:8443/oidc/mfg/` を�
 Kong AI Gateway 2.2 で全RESTエンドポイント（50ツール）を MCP ツールとして公開。リソースごとに MCP サーバーを分け、
 `/mcp/mfg/<resource>`（例：`/mcp/mfg/items`、`/mcp/mfg/orders`、計9サーバー）で提供（upstream は Kong API Gateway の `/mfg/<resource>`）。
 `kong/ai-gateway.yaml` は `kong/gen_mcp_tools.py` でOpenAPIスキーマから生成する。`MCP_README.md` を参照。
+
+#### MCP の OIDC（Auth0 ユーザーログイン）
+apikey の代わりに、利用者本人が Auth0 でログインして MCP を使うフローを2つ追加（MCP Authorization 仕様：401 → Protected Resource Metadata → OAuth 2.1 + PKCE）。
+- **Kong Gateway 3.16**（`ai-mcp-proxy` + `ai-mcp-oauth2`）：`https://localhost:8443/gw-mcp/mfg` に全50ツールを1サーバーで公開。
+  リソースごとの `conversion-only` プラグイン（`/gw-mcp/tools/<resource>`）を `listener` で集約。`ai-mcp-oauth2` は `conversion-listener` と同じルートに置けないため。
+  ツール呼び出しは Kong 内部でツールルートを通り、同じ JWT を `openid-connect` で再検証する（トークンなしの直接呼び出しは401）。`kong/kong-mcp-oauth2.yaml`（生成、`kong.yaml` と一緒に deck sync）。
+- **AI Gateway 2.2**：`https://localhost:11443/mcp-oidc/mfg/<resource>`（9サーバー、apikey版と併存）。`openid-connect` 認証ストラテジー（`kong/ai-gateway-oidc.yaml`）+ `access.metadata`。
+  ユーザーの JWT をそのまま Kong GW `/oidc/mfg`（m2mルート）に転送するので、Django まで利用者の `sub` が届き、ユーザー単位のレート制限も効く。
+- トークンの `aud` は MCP の resource URL と一致する必要がある。Auth0 側で API を2つ（`https://localhost:8443/gw-mcp/mfg`、`https://localhost:11443/mcp-oidc/mfg`）、
+  MCP クライアント用の Native アプリ（PKCE、コールバック `http://localhost:8765/callback`）を作成し、テナント設定 **Resource Parameter Compatibility Profile** を有効にする。
+- Claude Code：`claude mcp add --transport http mfg-gw-oidc https://localhost:8443/gw-mcp/mfg --client-id $AUTH0_MCP_CLIENT_ID --callback-port 8765` → `/mcp` で Authenticate。
+- 旧仕様（MCP 2025-03-26）のクライアント向けに、Kong GW のオリジン直下で `/.well-known/oauth-authorization-server`・`/register`・`/authorize` を DataKit で応答（`kong/kong-mcp-legacy-auth.yaml`）。
+  `/register` は事前登録の公開クライアント（`AUTH0_MCP_CLIENT_ID`）を返し、`/authorize` は `audience=https://localhost:8443/gw-mcp/mfg` を付けて Auth0 にリダイレクトする（旧仕様は `resource` パラメーターを送らないため）。同じ `/gw-mcp/mfg` を利用。AI GW は対象外。
+- AI GW DP はコンテナ内でも 11000/11443 で待ち受ける（401 の `resource_metadata` URL に DP 自身のポートが入るため）。詳細は `MCP_README.md` の「OIDC」。
 
 ### API Catalog と Dev Portal
 - **API Catalog**：REST API「Manufacturing Management API」（公開用OpenAPI `kong/openapi/manufacturing-api.yaml`、
@@ -300,6 +316,9 @@ with DataKit.
 | `/mfg/<resource>/...`     | `apikey` header (key-auth). Whole API, e.g. `/mfg/suppliers/` → `/api/suppliers/`. Upstream of the MCP server |
 | `/oidc/mfg/<resource>/...` | Auth0 OIDC, same as `/oidc/inventory` (browser and M2M), per-user rate limit |
 | `/items/...`              | Auth0 OIDC browser login (shared session). Django web UI logged in as the Auth0 user |
+| `/gw-mcp/mfg`             | MCP server (all 50 tools), Auth0 user login per the MCP authorization spec (`ai-mcp-proxy` listener + `ai-mcp-oauth2`), see `MCP_README.md` "OIDC" |
+| `/.well-known/oauth-authorization-server`, `/register`, `/authorize` | OAuth discovery for MCP clients on the 2025-03-26 spec (answered by Kong, DataKit), in front of `/gw-mcp/mfg` |
+| `/gw-mcp/tools/<resource>/...` | Internal tool routes of `/gw-mcp/mfg` (`conversion-only`); the same Auth0 token required (`openid-connect`) |
 | `/static/...`             | None. Django/DRF CSS, JS, and images (whitenoise), needed by the browsable API pages |
 
 Links and redirects use the client-facing URL. Kong strips the route path
@@ -311,10 +330,10 @@ trailing-slash redirects point at `https://localhost:8443/oidc/mfg/...` (or
 `/mfg/...`), not `django:3333` or `/api/...`.
 
 Interactive diagram of every auth flow (browser, web UI, Bearer JWT,
-client_credentials, apikey, MCP client), with step-by-step playback and
-components grouped by where they run:
-[docs/auth-flow-v3.html](docs/auth-flow-v3.html). Open it in a browser.
-Earlier versions: [v2](docs/auth-flow-v2.html) and the items-only
+client_credentials, apikey, MCP with apikey, MCP with Auth0 login on Kong GW and
+on AI GW), with step-by-step playback and components grouped by where they run:
+[docs/auth-flow-v4.html](docs/auth-flow-v4.html). Open it in a browser.
+Earlier versions: [v3](docs/auth-flow-v3.html), [v2](docs/auth-flow-v2.html) and the items-only
 [v1](docs/auth-flow.html).
 
 See `kong/README-kong.md` for topology notes.

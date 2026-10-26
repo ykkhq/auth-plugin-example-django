@@ -6,12 +6,15 @@
 #      (kong/gw-certs/, kong/ai-certs/)
 #   2. Django (docker compose; also creates the kong-net network)
 #   3. Konnect: control plane "django-apigw" + AI Gateway "django-ai-gw"
-#      (kong/konnect.yaml), Kong GW config (kong/kong.yaml, decK)
+#      (kong/konnect.yaml), Kong GW config (kong/kong.yaml + the Auth0 MCP
+#      server kong/kong-mcp-oauth2.yaml + its 2025-03-26 client discovery
+#      kong/kong-mcp-legacy-auth.yaml, decK)
 #   4. Kong Gateway DP "django-apigw-dp" (:8000/:8443, on kong-net as kong-dp)
 #   5. API Catalog + Dev Portal (kong/portal.yaml): API spec, portal with
 #      developer sign-up, pages
-#   6. MCP users + metering policy (kong/ai-gateway-billing.yaml), MCP servers
-#      (kong/ai-gateway.yaml), billing catalog (kong/mcp_billing.py), AI Gateway DP (:11000/:11443)
+#   6. MCP users + metering policy (kong/ai-gateway-billing.yaml), Auth0 auth
+#      strategy (kong/ai-gateway-oidc.yaml), MCP servers (kong/ai-gateway.yaml),
+#      billing catalog (kong/mcp_billing.py), AI Gateway DP (:11000/:11443)
 #   7. monitoring stack (Grafana :3000), unless --no-monitoring
 #   8. Catalog MCP servers (kong/catalog_mcp.py), once the AI Gateway answers
 #
@@ -47,6 +50,13 @@ PAT=$(<$PAT_FILE)
   die "kong/auth0.env missing: cp kong/auth0.env.example kong/auth0.env and fill it in (README \"OIDC with Auth0\")"
 source kong/auth0.env
 grep -q REPLACE_WITH kong/auth0.env && die "kong/auth0.env still has REPLACE_WITH_... placeholders"
+# issuer identifier for the MCP OAuth2 metadata (older auth0.env files lack it)
+export DECK_AUTH0_ISSUER_URL=${DECK_AUTH0_ISSUER_URL:-https://$AUTH0_DOMAIN/}
+# public client handed out by /register to 2025-03-26 MCP clients (kong-mcp-legacy-auth.yaml)
+if [[ -z $AUTH0_MCP_CLIENT_ID ]]; then
+  echo "WARN: AUTH0_MCP_CLIENT_ID not set in kong/auth0.env; old-spec MCP clients can't log in (MCP_README \"OIDC\")" >&2
+fi
+export DECK_AUTH0_MCP_CLIENT_ID=${AUTH0_MCP_CLIENT_ID:-AUTH0_MCP_CLIENT_ID-not-set}
 
 konnect() {  # konnect METHOD PATH [curl args...]
   local method=$1 url_path=$2; shift 2
@@ -85,10 +95,12 @@ step "Konnect: control plane $CP_NAME + AI Gateway $AI_GW_NAME"
 kongctl apply -f kong/konnect.yaml --pat "$PAT" --auto-approve ||
   die "kongctl apply failed. If $CP_NAME / $AI_GW_NAME already exist but weren't created by kongctl, run ./cleanup.sh first."
 
-step "Kong Gateway config (decK sync kong/kong.yaml)"
+step "Kong Gateway config (decK sync kong/kong.yaml kong/kong-mcp-oauth2.yaml kong/kong-mcp-legacy-auth.yaml)"
 export DECK_GW_TLS_CERT="$(awk '{printf "%s\\n",$0}' kong/tls/server.crt)"
 export DECK_GW_TLS_KEY="$(awk '{printf "%s\\n",$0}' kong/tls/server.key)"
-deck gateway sync kong/kong.yaml --konnect-token-file $PAT_FILE \
+# all files in one sync: decK deletes whatever the given files don't declare
+deck gateway sync kong/kong.yaml kong/kong-mcp-oauth2.yaml kong/kong-mcp-legacy-auth.yaml \
+  --konnect-token-file $PAT_FILE \
   --konnect-control-plane-name $CP_NAME
 
 if [[ -x .venv/bin/python ]]; then
@@ -139,6 +151,10 @@ done > kong/mcp-users.env && grep -q '^MCP_KEY_USER1=' kong/mcp-users.env || ech
 (set -a; source kong/mcp-users.env; METERING_API_TOKEN=$PAT \
   kongctl apply -f kong/ai-gateway-billing.yaml --pat "$PAT" --auto-approve)
 
+# Auth0 strategy before the servers too: the OIDC servers name it
+step "MCP Auth0 auth strategy (kongctl apply kong/ai-gateway-oidc.yaml)"
+kongctl apply -f kong/ai-gateway-oidc.yaml --pat "$PAT" --auto-approve
+
 step "MCP servers (kongctl apply kong/ai-gateway.yaml)"
 kongctl apply -f kong/ai-gateway.yaml --pat "$PAT" --auto-approve
 
@@ -174,6 +190,22 @@ wait_for "AI GW    https://localhost:11443/mcp/mfg/items (MCP initialize)" \
     -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
     -H "apikey: $APIKEY" \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"start.sh","version":"1.0.0"}}}' || ok=0
+# Auth0 MCP servers: the protected-resource metadata is public, MCP calls without
+# a token get 401 + WWW-Authenticate (the user login itself needs a browser)
+oauth_check() {  # oauth_check MCP_URL METADATA_URL: prints 200 when both behave
+  local meta=$(curl -sk -o /dev/null -w '%{http_code}' $2)
+  local hdr=$(curl -sk -o /dev/null -X POST $1 -H "Content-Type: application/json" -d '{}' \
+    -w '%{http_code} %header{www-authenticate}')
+  [[ $meta == 200 && $hdr == "401 Bearer resource_metadata="* ]] && echo 200 || echo "$meta/${hdr%% *}"
+}
+wait_for "Kong GW  https://localhost:8443/gw-mcp/mfg (Auth0 MCP, 401 + metadata)" \
+  oauth_check https://localhost:8443/gw-mcp/mfg \
+    https://localhost:8443/gw-mcp/mfg/.well-known/oauth-protected-resource || ok=0
+wait_for "Kong GW  https://localhost:8443/.well-known/oauth-authorization-server (2025-03-26 clients)" \
+  curl -sk -o /dev/null -w '%{http_code}' https://localhost:8443/.well-known/oauth-authorization-server || ok=0
+wait_for "AI GW    https://localhost:11443/mcp-oidc/mfg/items (Auth0 MCP, 401 + metadata)" \
+  oauth_check https://localhost:11443/mcp-oidc/mfg/items \
+    https://localhost:11443/mcp-oidc/mfg/items/.well-known/oauth-protected-resource || ok=0
 
 # --- 8. Catalog MCP servers (reads each server's live tools/list) -------------
 if [[ -x .venv/bin/python ]] && (( ok )); then
@@ -193,6 +225,9 @@ $( (( ok )) && echo "Demo is up." || echo "Started, but a check failed: see dock
   MCP             https://localhost:11443/mcp/mfg/<resource>  (header apikey: $APIKEY)
                   resources: items item-components suppliers customers purchase-orders
                              orders shipments shipping-statuses shipping-schedule
+  MCP (Auth0)     https://localhost:8443/gw-mcp/mfg            (Kong GW, all tools; also 2025-03-26 clients)
+                  https://localhost:11443/mcp-oidc/mfg/<resource>  (AI GW)
+                  claude mcp add --transport http <name> <url> --client-id \$AUTH0_MCP_CLIENT_ID --callback-port 8765
   Dev Portal      https://$portal_host   (sign up at /register)
 EOF
 (( monitoring )) && echo "  Grafana         http://localhost:3000"

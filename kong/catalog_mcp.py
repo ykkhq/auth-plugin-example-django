@@ -102,7 +102,11 @@ def canon(tools):
 def load_servers():
     loader = type("Loader", (yaml.SafeLoader,), {})
     loader.add_constructor("!lookup", lambda load, node: load.construct_mapping(node))
-    return yaml.load(AI_GATEWAY_FILE.read_text(), Loader=loader)["ai_gateway_mcp_servers"]
+    loader.add_constructor("!env", lambda load, node: load.construct_scalar(node))
+    servers = yaml.load(AI_GATEWAY_FILE.read_text(), Loader=loader)["ai_gateway_mcp_servers"]
+    # apikey servers only: tools/list here authenticates with the demo key, and the
+    # OIDC servers (/mcp-oidc/mfg) offer the same tools behind an Auth0 login
+    return [s for s in servers if "mcp-key-auth" in s["access"]["auth_strategies"]]
 
 
 def list_all(path):

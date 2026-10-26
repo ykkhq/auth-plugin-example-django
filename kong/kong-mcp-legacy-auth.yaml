@@ -1,0 +1,149 @@
+# OAuth discovery for MCP clients that only implement the 2025-03-26 MCP spec,
+# in front of the same MCP server /gw-mcp/mfg (kong/kong-mcp-oauth2.yaml).
+# Synced together with the other two files (decK sync deletes what none declare):
+#   deck gateway sync kong/kong.yaml kong/kong-mcp-oauth2.yaml kong/kong-mcp-legacy-auth.yaml ...
+#
+# A 2025-03-26 client ignores WWW-Authenticate / protected resource metadata. It
+# drops the path of the MCP URL and treats that origin as the authorization server:
+#   GET  https://localhost:8443/.well-known/oauth-authorization-server   (RFC 8414)
+#   POST <registration_endpoint>                                         (RFC 7591 DCR)
+#   GET  <authorization_endpoint>?...&code_challenge=...                 (PKCE)
+#   POST <token_endpoint>
+# and it never sends the RFC 8707 resource parameter. Kong answers the first three
+# itself (DataKit exit nodes; the django-mcp-legacy-oauth upstream is never called):
+#   - metadata: issuer = this origin, authorization/registration = Kong, token = Auth0
+#   - /register: hands out the pre-registered public client (Auth0 Native app
+#     "MCP Client", no secret) instead of open DCR on the Auth0 tenant
+#   - /authorize: 302 to Auth0 /authorize with audience=https://localhost:8443/gw-mcp/mfg,
+#     so the token's aud matches the resource ai-mcp-oauth2 checks
+# The token request goes straight to Auth0. Then the client calls /gw-mcp/mfg with
+# the token, exactly like a current-spec client.
+#
+# The client's redirect_uri (e.g. http://localhost:8765/callback) must be an
+# Allowed Callback URL of the Auth0 Native app; Auth0 still enforces that.
+services:
+- name: django-mcp-legacy-oauth
+  host: django
+  port: 3333
+  routes:
+  - name: mcp-legacy-as-metadata
+    paths:
+    - ~/.well-known/oauth-authorization-server$
+    methods:
+    - GET
+    protocols:
+    - https
+  - name: mcp-legacy-register
+    paths:
+    - ~/register$
+    methods:
+    - POST
+    protocols:
+    - https
+  - name: mcp-legacy-authorize
+    paths:
+    - ~/authorize$
+    methods:
+    - GET
+    protocols:
+    - https
+plugins:
+- config:
+    nodes:
+    - name: metadata
+      type: static
+      values:
+        issuer: https://localhost:8443
+        authorization_endpoint: https://localhost:8443/authorize
+        token_endpoint: '${{ env "DECK_AUTH0_ISSUER_URL" }}oauth/token'
+        registration_endpoint: https://localhost:8443/register
+        response_types_supported:
+        - code
+        grant_types_supported:
+        - authorization_code
+        - refresh_token
+        # clients refuse a server that doesn't list S256
+        code_challenge_methods_supported:
+        - S256
+        token_endpoint_auth_methods_supported:
+        - none
+        scopes_supported:
+        - openid
+        - profile
+        - email
+        - offline_access
+    - name: json
+      type: static
+      values:
+        Content-Type: application/json
+    - name: done
+      type: exit
+      status: 200
+      inputs:
+        body: metadata
+        headers: json
+  enabled: true
+  instance_name: mcp-legacy-as-metadata
+  name: datakit
+  protocols:
+  - https
+  route: mcp-legacy-as-metadata
+- config:
+    nodes:
+    # RFC 7591 response: the shared public client, the client's own redirect_uris
+    - name: client
+      type: jq
+      inputs:
+        req: request.body
+      jq: |
+        {
+          client_id: "${{ env "DECK_AUTH0_MCP_CLIENT_ID" }}",
+          client_id_issued_at: (now | floor),
+          client_name: (.req.client_name // "MCP client"),
+          redirect_uris: (.req.redirect_uris // []),
+          token_endpoint_auth_method: "none",
+          grant_types: ["authorization_code", "refresh_token"],
+          response_types: ["code"]
+        }
+    - name: json
+      type: static
+      values:
+        Content-Type: application/json
+    - name: done
+      type: exit
+      status: 201
+      inputs:
+        body: client
+        headers: json
+  enabled: true
+  instance_name: mcp-legacy-register
+  name: datakit
+  protocols:
+  - https
+  route: mcp-legacy-register
+- config:
+    nodes:
+    # keep the client's parameters (client_id, redirect_uri, state, PKCE, scope),
+    # force the audience, drop any resource parameter
+    - name: location
+      type: jq
+      inputs:
+        query: request.query
+      jq: |
+        {
+          Location: ("${{ env "DECK_AUTH0_ISSUER_URL" }}authorize?" + (
+            (.query // {}) | del(.resource) | . + {audience: "https://localhost:8443/gw-mcp/mfg"}
+            | to_entries | map("\(.key)=\(.value | if type == "array" then .[0] else . end | tostring | @uri)")
+            | join("&")))
+        }
+    - name: done
+      type: exit
+      status: 302
+      inputs:
+        headers: location
+  enabled: true
+  instance_name: mcp-legacy-authorize
+  name: datakit
+  protocols:
+  - https
+  route: mcp-legacy-authorize

@@ -45,7 +45,9 @@ docker run -d --name django-ai-gw \
 -e "KONG_CLUSTER_CERT_KEY=/etc/kong/certs/tls.key" \
 -e "KONG_LUA_SSL_TRUSTED_CERTIFICATE=system,/etc/kong/ca/ca.crt" \
 -e "KONG_KONNECT_MODE=on" \
--p 11000:8000 \
--p 11443:8443 \
+`# listen on the published ports: the MCP OAuth2 401 advertises its metadata URL with the DP's own port` \
+-e "KONG_PROXY_LISTEN=0.0.0.0:11000 reuseport backlog=16384, 0.0.0.0:11443 http2 ssl reuseport backlog=16384" \
+-p 11000:11000 \
+-p 11443:11443 \
 kong/kong-ai-gateway:2.2.0-distroless >/dev/null
 echo "started $AI_GW_NAME -> $CP_HOST"

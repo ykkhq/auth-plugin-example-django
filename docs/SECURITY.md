@@ -50,7 +50,33 @@ Client ──TLS──▶ Kong: authenticate (OIDC) + authorize (scopes/roles) +
 | G9 | Self-signed default certificate on `localhost:8443` | Kong | Users learn to click through certificate warnings |
 | G10 | Cookie-based sessions can't be revoked on the server | `session_storage: cookie` | A stolen cookie works until it times out (up to 8 h) |
 | G11 | A disabled `pre-function` with Lua that makes HTTP calls is still in config, and the DP may run with `untrusted_lua` set to `lax` | `kong.yaml`, DP env | A larger attack surface if someone re-enables it |
-| G12 | The MCP path uses a static apikey shared by all MCP clients | `kong/ai-gateway.yaml` | No per-user identity or revocation for AI agents |
+| G12 | The MCP path uses a static apikey shared by all MCP clients | `kong/ai-gateway.yaml` | No per-user identity or revocation for AI agents. Partly addressed: `/gw-mcp/mfg` (Kong GW) and `/mcp-oidc/mfg/<resource>` (AI GW) take an Auth0 user token instead, see below |
+
+### MCP with Auth0 user login (added)
+
+- The token `aud` must equal the MCP resource URL (`ai-mcp-oauth2` and the AI GW
+  MCP OAuth2 policy enforce it; there is no separate audience setting). A token
+  minted for the REST API (`DECK_AUTH0_AUDIENCE`) is rejected (401 "Invalid audience").
+  Keep `insecure_relaxed_audience_validation` off.
+- The Kong GW tool routes `/gw-mcp/tools/<resource>` are ordinary routes, reachable
+  from outside. Tool calls arrive on them as internal requests (`client_ip` `unix:`),
+  so IP restriction can't separate them. Instead `passthrough_credentials` keeps the
+  user's JWT and `openid-connect` on every tool route validates it again; a call
+  without a valid MCP token gets 401.
+- The AI GW OIDC servers forward the user's JWT to Kong GW `/oidc/mfg`
+  (`hide_credentials: false`), whose m2m route now also accepts the
+  `https://localhost:11443/mcp-oidc/mfg` audience. That widens the m2m route to
+  MCP tokens on purpose; remove the audience there if the forwarding is dropped.
+- 2025-03-26 MCP clients (`kong/kong-mcp-legacy-auth.yaml`): `/register` is a
+  static stand-in for DCR that returns one shared public client to anyone. That's
+  only as safe as a public client is: no secret, PKCE required, and Auth0's
+  Allowed Callback URLs are the real control, so keep that list short and loopback-only.
+  `/authorize` only ever redirects to the Auth0 tenant (fixed base URL), with the
+  audience forced, so it can't be turned into an open redirect or an audience switch.
+- Django still sees `user1` Basic auth (G1); the user's identity reaches it only as
+  `X-Authenticated-User`. Tool-level authorization per user would use
+  `ai-mcp-proxy` ACLs (`default_acl`, `tools[].acl`) with consumer mapping from
+  the token.
 
 ## Recommendations
 

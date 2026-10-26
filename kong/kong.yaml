@@ -409,6 +409,11 @@ plugins:
     - bearer
     - client_credentials
     scopes: []
+    # also the Auth0 user tokens that the AI GW OIDC MCP servers
+    # (/mcp-oidc/mfg/<resource>, kong/ai-gateway-oidc.yaml) forward here
+    audience_required:
+    - "${{ env "DECK_AUTH0_AUDIENCE" }}"
+    - https://localhost:11443/mcp-oidc/mfg
   enabled: true
   instance_name: auth0-oidc-mfg-m2m
   name: openid-connect
