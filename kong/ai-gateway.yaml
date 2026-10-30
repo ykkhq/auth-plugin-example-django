@@ -25,6 +25,10 @@
 #   MCP client --Auth0 JWT--> AI GW :11443/mcp-oidc/mfg/<resource>  (aud checked)
 #              --same JWT-->  Kong GW :8443/oidc/mfg/<resource>/...  (openid-connect bearer)
 #              --Basic-->     Django :3333/api/<resource>/...
+#
+# Tools by role: the strategy maps the token's mfg_roles claim to the AI consumer
+# groups sales/manager/admin (kong/ai-gateway-oidc.yaml); each OIDC tool's
+# access.acls allows only its roles, so tools/list is filtered and other calls get 403.
 ai_gateway_mcp_servers:
   - ref: mfg-customers-mcp
     ai_gateway: !lookup {name: django-ai-gw}
@@ -2023,6 +2027,9 @@ ai_gateway_mcp_servers:
       acl_attribute_type: consumer
       auth_strategies:
         - mcp-auth0-oidc
+      default_tool_acls:
+        allow:
+          - admin
       metadata:
         resource: https://localhost:11443/mcp-oidc/mfg
         authorization_servers:
@@ -2050,6 +2057,12 @@ ai_gateway_mcp_servers:
         annotations:
           title: List customers and dealers
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: create-customer
         description: Create a new customer or dealer.
         method: POST
@@ -2099,6 +2112,12 @@ ai_gateway_mcp_servers:
                   - name
         annotations:
           title: Create a customer or dealer
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: get-customer
         description: Retrieve a single customer or dealer by its id.
         method: GET
@@ -2113,6 +2132,12 @@ ai_gateway_mcp_servers:
         annotations:
           title: Get a customer or dealer
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: update-customer
         description: Replace all fields of an existing customer or dealer (PUT).
         method: PUT
@@ -2170,6 +2195,12 @@ ai_gateway_mcp_servers:
         annotations:
           title: Replace a customer or dealer
           idempotent_hint: true
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: patch-customer
         description: Update only the given fields of an existing customer or dealer (PATCH).
         method: PATCH
@@ -2223,6 +2254,12 @@ ai_gateway_mcp_servers:
                     type: boolean
         annotations:
           title: Update a customer or dealer
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: delete-customer
         description: Permanently delete a customer or dealer by its id.
         method: DELETE
@@ -2238,6 +2275,10 @@ ai_gateway_mcp_servers:
           title: Delete a customer or dealer
           destructive_hint: true
           idempotent_hint: true
+        access:
+          acls:
+            allow:
+              - admin
   - ref: mfg-oidc-item-components-mcp
     ai_gateway: !lookup {name: django-ai-gw}
     name: mfg-oidc-item-components-mcp
@@ -2260,6 +2301,9 @@ ai_gateway_mcp_servers:
       acl_attribute_type: consumer
       auth_strategies:
         - mcp-auth0-oidc
+      default_tool_acls:
+        allow:
+          - admin
       metadata:
         resource: https://localhost:11443/mcp-oidc/mfg
         authorization_servers:
@@ -2285,6 +2329,11 @@ ai_gateway_mcp_servers:
         annotations:
           title: List bill-of-materials rows (item components)
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: create-item-component
         description: Create a new bill-of-materials row (item component).
         method: POST
@@ -2314,6 +2363,11 @@ ai_gateway_mcp_servers:
                   - quantity
         annotations:
           title: Create a bill-of-materials row (item component)
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: get-item-component
         description: Retrieve a single bill-of-materials row (item component) by its id.
         method: GET
@@ -2328,6 +2382,11 @@ ai_gateway_mcp_servers:
         annotations:
           title: Get a bill-of-materials row (item component)
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: update-item-component
         description: Replace all fields of an existing bill-of-materials row (item component) (PUT).
         method: PUT
@@ -2365,6 +2424,11 @@ ai_gateway_mcp_servers:
         annotations:
           title: Replace a bill-of-materials row (item component)
           idempotent_hint: true
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: patch-item-component
         description: Update only the given fields of an existing bill-of-materials row (item component)
           (PATCH).
@@ -2398,6 +2462,11 @@ ai_gateway_mcp_servers:
                     maxLength: 200
         annotations:
           title: Update a bill-of-materials row (item component)
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: delete-item-component
         description: Permanently delete a bill-of-materials row (item component) by its id.
         method: DELETE
@@ -2413,6 +2482,10 @@ ai_gateway_mcp_servers:
           title: Delete a bill-of-materials row (item component)
           destructive_hint: true
           idempotent_hint: true
+        access:
+          acls:
+            allow:
+              - admin
   - ref: mfg-oidc-items-mcp
     ai_gateway: !lookup {name: django-ai-gw}
     name: mfg-oidc-items-mcp
@@ -2435,6 +2508,9 @@ ai_gateway_mcp_servers:
       acl_attribute_type: consumer
       auth_strategies:
         - mcp-auth0-oidc
+      default_tool_acls:
+        allow:
+          - admin
       metadata:
         resource: https://localhost:11443/mcp-oidc/mfg
         authorization_servers:
@@ -2463,6 +2539,12 @@ ai_gateway_mcp_servers:
         annotations:
           title: List inventory items
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: create-item
         description: Create a new inventory item (product, component or raw material).
         method: POST
@@ -2508,6 +2590,11 @@ ai_gateway_mcp_servers:
                   - unit_price
         annotations:
           title: Create a inventory item (product, component or raw material)
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: get-item
         description: Retrieve a single inventory item (product, component or raw material) by its id.
         method: GET
@@ -2522,6 +2609,12 @@ ai_gateway_mcp_servers:
         annotations:
           title: Get a inventory item (product, component or raw material)
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: update-item
         description: Replace all fields of an existing inventory item (product, component or raw material)
           (PUT).
@@ -2576,6 +2669,11 @@ ai_gateway_mcp_servers:
         annotations:
           title: Replace a inventory item (product, component or raw material)
           idempotent_hint: true
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: patch-item
         description: Update only the given fields of an existing inventory item (product, component or
           raw material) (PATCH).
@@ -2625,6 +2723,11 @@ ai_gateway_mcp_servers:
                     pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
         annotations:
           title: Update a inventory item (product, component or raw material)
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: delete-item
         description: Permanently delete a inventory item (product, component or raw material) by its id.
         method: DELETE
@@ -2640,6 +2743,10 @@ ai_gateway_mcp_servers:
           title: Delete a inventory item (product, component or raw material)
           destructive_hint: true
           idempotent_hint: true
+        access:
+          acls:
+            allow:
+              - admin
       - name: build-item
         description: 'Produce `quantity` units of this item by consuming its bill of materials (item-components)
           from stock. All-or-nothing: 409 if any component is short.'
@@ -2666,6 +2773,11 @@ ai_gateway_mcp_servers:
                   - quantity
         annotations:
           title: Build (manufacture) an item from its components
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
   - ref: mfg-oidc-orders-mcp
     ai_gateway: !lookup {name: django-ai-gw}
     name: mfg-oidc-orders-mcp
@@ -2688,6 +2800,9 @@ ai_gateway_mcp_servers:
       acl_attribute_type: consumer
       auth_strategies:
         - mcp-auth0-oidc
+      default_tool_acls:
+        allow:
+          - admin
       metadata:
         resource: https://localhost:11443/mcp-oidc/mfg
         authorization_servers:
@@ -2721,6 +2836,12 @@ ai_gateway_mcp_servers:
         annotations:
           title: List sales orders
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: create-order
         description: Create a new sales order.
         method: POST
@@ -2784,6 +2905,12 @@ ai_gateway_mcp_servers:
                   - order_number
         annotations:
           title: Create a sales order
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: get-order
         description: Retrieve a single sales order by its id.
         method: GET
@@ -2798,6 +2925,12 @@ ai_gateway_mcp_servers:
         annotations:
           title: Get a sales order
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: update-order
         description: Replace all fields of an existing sales order (PUT).
         method: PUT
@@ -2869,6 +3002,12 @@ ai_gateway_mcp_servers:
         annotations:
           title: Replace a sales order
           idempotent_hint: true
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: patch-order
         description: Update only the given fields of an existing sales order (PATCH).
         method: PATCH
@@ -2935,6 +3074,12 @@ ai_gateway_mcp_servers:
                         - quantity
         annotations:
           title: Update a sales order
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: delete-order
         description: Permanently delete a sales order by its id.
         method: DELETE
@@ -2950,6 +3095,10 @@ ai_gateway_mcp_servers:
           title: Delete a sales order
           destructive_hint: true
           idempotent_hint: true
+        access:
+          acls:
+            allow:
+              - admin
       - name: cancel-order
         description: Cancel a sales order that has not shipped yet.
         method: POST
@@ -2963,6 +3112,12 @@ ai_gateway_mcp_servers:
             description: A unique integer value identifying this order.
         annotations:
           title: Cancel a sales order that has not shipped yet
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: confirm-order
         description: Confirm a draft sales order.
         method: POST
@@ -2976,6 +3131,12 @@ ai_gateway_mcp_servers:
             description: A unique integer value identifying this order.
         annotations:
           title: Confirm a draft sales order
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
   - ref: mfg-oidc-purchase-orders-mcp
     ai_gateway: !lookup {name: django-ai-gw}
     name: mfg-oidc-purchase-orders-mcp
@@ -2998,6 +3159,9 @@ ai_gateway_mcp_servers:
       acl_attribute_type: consumer
       auth_strategies:
         - mcp-auth0-oidc
+      default_tool_acls:
+        allow:
+          - admin
       metadata:
         resource: https://localhost:11443/mcp-oidc/mfg
         authorization_servers:
@@ -3030,6 +3194,11 @@ ai_gateway_mcp_servers:
         annotations:
           title: List purchase orders
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: create-purchase-order
         description: Create a new purchase order.
         method: POST
@@ -3090,6 +3259,11 @@ ai_gateway_mcp_servers:
                   - supplier
         annotations:
           title: Create a purchase order
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: get-purchase-order
         description: Retrieve a single purchase order by its id.
         method: GET
@@ -3104,6 +3278,11 @@ ai_gateway_mcp_servers:
         annotations:
           title: Get a purchase order
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: update-purchase-order
         description: Replace all fields of an existing purchase order (PUT).
         method: PUT
@@ -3172,6 +3351,11 @@ ai_gateway_mcp_servers:
         annotations:
           title: Replace a purchase order
           idempotent_hint: true
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: patch-purchase-order
         description: Update only the given fields of an existing purchase order (PATCH).
         method: PATCH
@@ -3235,6 +3419,11 @@ ai_gateway_mcp_servers:
                         - unit_cost
         annotations:
           title: Update a purchase order
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: delete-purchase-order
         description: Permanently delete a purchase order by its id.
         method: DELETE
@@ -3250,6 +3439,10 @@ ai_gateway_mcp_servers:
           title: Delete a purchase order
           destructive_hint: true
           idempotent_hint: true
+        access:
+          acls:
+            allow:
+              - admin
       - name: receive-purchase-order
         description: Add received quantities to inventory stock and update the purchase order status (partially_received
           or received). Omit lines to receive everything outstanding. The PO must be submitted, confirmed
@@ -3286,6 +3479,11 @@ ai_gateway_mcp_servers:
                     description: Lines to receive. Omit to receive everything outstanding.
         annotations:
           title: Receive goods for a purchase order
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
   - ref: mfg-oidc-shipments-mcp
     ai_gateway: !lookup {name: django-ai-gw}
     name: mfg-oidc-shipments-mcp
@@ -3308,6 +3506,9 @@ ai_gateway_mcp_servers:
       acl_attribute_type: consumer
       auth_strategies:
         - mcp-auth0-oidc
+      default_tool_acls:
+        allow:
+          - admin
       metadata:
         resource: https://localhost:11443/mcp-oidc/mfg
         authorization_servers:
@@ -3341,6 +3542,12 @@ ai_gateway_mcp_servers:
         annotations:
           title: List shipments
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: create-shipment
         description: Create a new shipment.
         method: POST
@@ -3375,6 +3582,11 @@ ai_gateway_mcp_servers:
                   - shipment_number
         annotations:
           title: Create a shipment
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: get-shipment
         description: Retrieve a single shipment by its id.
         method: GET
@@ -3389,6 +3601,12 @@ ai_gateway_mcp_servers:
         annotations:
           title: Get a shipment
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: update-shipment
         description: Replace all fields of an existing shipment (PUT).
         method: PUT
@@ -3431,6 +3649,11 @@ ai_gateway_mcp_servers:
         annotations:
           title: Replace a shipment
           idempotent_hint: true
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: patch-shipment
         description: Update only the given fields of an existing shipment (PATCH).
         method: PATCH
@@ -3469,6 +3692,11 @@ ai_gateway_mcp_servers:
                     format: date
         annotations:
           title: Update a shipment
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: delete-shipment
         description: Permanently delete a shipment by its id.
         method: DELETE
@@ -3484,6 +3712,10 @@ ai_gateway_mcp_servers:
           title: Delete a shipment
           destructive_hint: true
           idempotent_hint: true
+        access:
+          acls:
+            allow:
+              - admin
   - ref: mfg-oidc-shipping-schedule-mcp
     ai_gateway: !lookup {name: django-ai-gw}
     name: mfg-oidc-shipping-schedule-mcp
@@ -3506,6 +3738,9 @@ ai_gateway_mcp_servers:
       acl_attribute_type: consumer
       auth_strategies:
         - mcp-auth0-oidc
+      default_tool_acls:
+        allow:
+          - admin
       metadata:
         resource: https://localhost:11443/mcp-oidc/mfg
         authorization_servers:
@@ -3553,6 +3788,12 @@ ai_gateway_mcp_servers:
         annotations:
           title: Get the shipping schedule
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
   - ref: mfg-oidc-shipping-statuses-mcp
     ai_gateway: !lookup {name: django-ai-gw}
     name: mfg-oidc-shipping-statuses-mcp
@@ -3575,6 +3816,9 @@ ai_gateway_mcp_servers:
       acl_attribute_type: consumer
       auth_strategies:
         - mcp-auth0-oidc
+      default_tool_acls:
+        allow:
+          - admin
       metadata:
         resource: https://localhost:11443/mcp-oidc/mfg
         authorization_servers:
@@ -3607,6 +3851,12 @@ ai_gateway_mcp_servers:
         annotations:
           title: List shipping status events
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
       - name: create-shipping-status
         description: Append a status event and move the shipment to that status. The first in_transit
           deducts the order's line quantities from stock (409 if short) and marks the order shipped; delivered
@@ -3646,6 +3896,11 @@ ai_gateway_mcp_servers:
                   - status
         annotations:
           title: Record a new shipping status for a shipment
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: get-shipping-status
         description: Retrieve one status event by its id.
         method: GET
@@ -3660,6 +3915,12 @@ ai_gateway_mcp_servers:
         annotations:
           title: Get a shipping status event
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - sales
+              - manager
+              - admin
   - ref: mfg-oidc-suppliers-mcp
     ai_gateway: !lookup {name: django-ai-gw}
     name: mfg-oidc-suppliers-mcp
@@ -3682,6 +3943,9 @@ ai_gateway_mcp_servers:
       acl_attribute_type: consumer
       auth_strategies:
         - mcp-auth0-oidc
+      default_tool_acls:
+        allow:
+          - admin
       metadata:
         resource: https://localhost:11443/mcp-oidc/mfg
         authorization_servers:
@@ -3701,6 +3965,11 @@ ai_gateway_mcp_servers:
         annotations:
           title: List suppliers
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: create-supplier
         description: Create a new supplier.
         method: POST
@@ -3744,6 +4013,11 @@ ai_gateway_mcp_servers:
                   - name
         annotations:
           title: Create a supplier
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: get-supplier
         description: Retrieve a single supplier by its id.
         method: GET
@@ -3758,6 +4032,11 @@ ai_gateway_mcp_servers:
         annotations:
           title: Get a supplier
           read_only_hint: true
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: update-supplier
         description: Replace all fields of an existing supplier (PUT).
         method: PUT
@@ -3809,6 +4088,11 @@ ai_gateway_mcp_servers:
         annotations:
           title: Replace a supplier
           idempotent_hint: true
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: patch-supplier
         description: Update only the given fields of an existing supplier (PATCH).
         method: PATCH
@@ -3856,6 +4140,11 @@ ai_gateway_mcp_servers:
                     type: boolean
         annotations:
           title: Update a supplier
+        access:
+          acls:
+            allow:
+              - manager
+              - admin
       - name: delete-supplier
         description: Permanently delete a supplier by its id.
         method: DELETE
@@ -3871,3 +4160,7 @@ ai_gateway_mcp_servers:
           title: Delete a supplier
           destructive_hint: true
           idempotent_hint: true
+        access:
+          acls:
+            allow:
+              - admin

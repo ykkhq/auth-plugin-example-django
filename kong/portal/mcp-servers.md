@@ -43,6 +43,14 @@ claude mcp add --transport http mfg-gw-oidc https://localhost:8443/gw-mcp/mfg \
 
 Then run `/mcp` in Claude Code and choose **Authenticate**.
 
+Your Auth0 role decides which tools you see and can call:
+
+| Role | Tools |
+|---|---|
+| `sales` | customers and sales orders, read-only items, shipments and shipping schedule |
+| `manager` | every tool except `delete-*` |
+| `admin` | all 50 tools |
+
 ## Manufacturing Customers {#customers}
 
 `https://localhost:11443/mcp/mfg/customers`

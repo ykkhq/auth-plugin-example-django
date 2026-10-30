@@ -257,6 +257,61 @@ curl -sk https://localhost:11443/mcp-oidc/mfg/items/.well-known/oauth-protected-
 # and MCP=https://localhost:8443/gw-mcp/mfg: tools/list returns all 50 tools
 ```
 
+### Tools by role (Auth0)
+
+Each Auth0 user has one of three roles, and sees and can call only that role's
+tools on both OIDC flows. `tools/list` returns only the allowed tools, and calling
+any other tool gets HTTP 403. The apikey servers (`/mcp/mfg/*`) aren't filtered.
+
+| Role | Tools | Count |
+|---|---|---|
+| `sales` | customers and orders (everything but delete, incl. `confirm-order`, `cancel-order`); `list-`/`get-` for items, shipments, shipping statuses; `get-shipping-schedule`. No suppliers, purchase orders or BOM. | 19 |
+| `manager` | every tool except `delete-*` | 43 |
+| `admin` | all tools | 50 |
+
+```
+Auth0 Post-Login Action --> access token claim  "mfg_roles": ["sales"]
+Kong GW  ai-mcp-oauth2 (listener) + openid-connect (tool routes): consumer_groups_claim mfg_roles
+         -> consumer group "sales" (no consumer needed) -> ai-mcp-proxy tools[].acl.allow
+AI GW    auth strategy mcp-auth0-oidc: consumer_groups_claim mfg_roles
+         -> AI consumer group "sales" -> tools[].access.acls.allow
+```
+
+The rule is `tool_roles()` in `kong/gen_mcp_tools.py`. Change it there and
+regenerate. The consumer groups are `consumer_groups` in the generated
+`kong/kong-mcp-oauth2.yaml` (Kong GW) and `ai_gateway_consumer_groups` in
+`kong/ai-gateway-oidc.yaml` (AI GW). A token without a known role is rejected
+(`consumer_groups_optional: false`).
+
+**Auth0 setup (once, in addition to "Auth0 setup" above):**
+
+1. **Roles** (User Management → Roles → Create Role): `sales`, `manager`, `admin`.
+   The names must match exactly, because they become the Kong consumer group names.
+2. **Users** (User Management → Users → Create User, connection
+   `Username-Password-Authentication`): e.g. `sales@mfg.demo`, `manager@mfg.demo`,
+   `admin@mfg.demo`. On each user's **Roles** tab, assign one role.
+3. **Action** (Actions → Library → Create Action → Build from scratch, trigger
+   *Login / Post Login*), named "MCP roles claim". Paste this code, then **Deploy**:
+
+   ```js
+   exports.onExecutePostLogin = async (event, api) => {
+     api.accessToken.setCustomClaim('mfg_roles', event.authorization?.roles ?? []);
+   };
+   ```
+
+4. **Trigger** (Actions → Triggers → post-login): drag "MCP roles claim" into the
+   flow and click **Apply**.
+
+You don't need RBAC on the APIs: `event.authorization.roles` holds the user's roles
+either way. Users who are already signed in must sign in again to get a token with
+the claim (in Claude Code: `/mcp` → the server → **Clear authentication**, then
+**Authenticate**).
+
+Check it: decode the access token (e.g. jwt.io). It must contain
+`"mfg_roles": ["sales"]`. Then compare `tools/list` on `/gw-mcp/mfg` for each user
+(19 / 43 / 50 tools). On the AI GW, `/mcp-oidc/mfg/suppliers` lists no tools for
+`sales`.
+
 ### Clients on the 2025-03-26 MCP spec (Kong GW only)
 
 Older MCP clients (for example MCP TypeScript SDK ≤ 1.12) predate protected
@@ -320,6 +375,10 @@ curl -sk -o /dev/null -w '%{http_code} %header{location}\n' \
   Callback URL of the Native app.
 - 401 from a tool call on `/gw-mcp/mfg` while `tools/list` works: the tool route's
   `openid-connect` didn't get the token. Check `passthrough_credentials: true`.
+- Every MCP request is rejected after login, or `tools/list` is empty: the token has
+  no `mfg_roles` claim (Action not deployed, not in the post-login flow, or an old
+  token), or the role name isn't exactly `sales` / `manager` / `admin`.
+- 403 on a tool call: the user's role doesn't allow that tool (see "Tools by role").
 
 ## Konnect Catalog and Dev Portal
 

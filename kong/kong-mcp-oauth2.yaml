@@ -16,9 +16,17 @@
 # routes + one listener. Tool calls re-enter Kong through the tool routes with the
 # client's headers (passthrough_credentials keeps the JWT), so openid-connect there
 # validates the same token and rejects direct calls without one.
+#
+# Tools by role: ai-mcp-oauth2 and openid-connect map the token's mfg_roles claim to
+# the consumer groups sales/manager/admin below; each tool's acl allows only its
+# roles, so the listener's tools/list is filtered and other calls get 403.
 _format_version: '3.0'
 _konnect:
   control_plane_name: django-apigw
+consumer_groups:
+  - name: sales
+  - name: manager
+  - name: admin
 services:
   - name: django-mcp
     host: django
@@ -188,6 +196,7 @@ plugins:
         tag: mfg-gw-mcp
         timeout: 60000
         forward_client_headers: true
+      include_consumer_groups: true
       logging:
         log_statistics: true
         log_payloads: false
@@ -205,6 +214,10 @@ plugins:
         - profile
         - email
       passthrough_credentials: true
+      consumer_optional: true
+      consumer_groups_claim:
+        - mfg_roles
+      consumer_groups_optional: false
   - name: rate-limiting
     instance_name: gw-mcp-rate-limit
     route: django-route-gw-mcp
@@ -220,6 +233,7 @@ plugins:
       - mfg-gw-mcp
     config:
       mode: conversion-only
+      include_consumer_groups: true
       tools:
         - name: list-customers
           description: List all customers and dealers. Filter by customer_type (direct or dealer) or is_active.
@@ -242,6 +256,11 @@ plugins:
           annotations:
             title: List customers and dealers
             read_only_hint: true
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: create-customer
           description: Create a new customer or dealer.
           method: POST
@@ -291,6 +310,11 @@ plugins:
                     - name
           annotations:
             title: Create a customer or dealer
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: get-customer
           description: Retrieve a single customer or dealer by its id.
           method: GET
@@ -305,6 +329,11 @@ plugins:
           annotations:
             title: Get a customer or dealer
             read_only_hint: true
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: update-customer
           description: Replace all fields of an existing customer or dealer (PUT).
           method: PUT
@@ -362,6 +391,11 @@ plugins:
           annotations:
             title: Replace a customer or dealer
             idempotent_hint: true
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: patch-customer
           description: Update only the given fields of an existing customer or dealer (PATCH).
           method: PATCH
@@ -415,6 +449,11 @@ plugins:
                       type: boolean
           annotations:
             title: Update a customer or dealer
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: delete-customer
           description: Permanently delete a customer or dealer by its id.
           method: DELETE
@@ -430,6 +469,9 @@ plugins:
             title: Delete a customer or dealer
             destructive_hint: true
             idempotent_hint: true
+          acl:
+            allow:
+              - admin
       logging:
         log_statistics: true
         log_payloads: false
@@ -451,6 +493,9 @@ plugins:
       upstream_headers_names:
         - X-Authenticated-User
         - X-Authenticated-Email
+      consumer_groups_claim:
+        - mfg_roles
+      consumer_groups_optional: false
   - name: datakit
     instance_name: gw-mcp-basic-auth-customers
     route: django-route-gw-mcp-customers
@@ -475,6 +520,7 @@ plugins:
       - mfg-gw-mcp
     config:
       mode: conversion-only
+      include_consumer_groups: true
       tools:
         - name: list-item-components
           description: List all bill-of-materials rows (item components). Filter by parent to get one
@@ -495,6 +541,10 @@ plugins:
           annotations:
             title: List bill-of-materials rows (item components)
             read_only_hint: true
+          acl:
+            allow:
+              - manager
+              - admin
         - name: create-item-component
           description: Create a new bill-of-materials row (item component).
           method: POST
@@ -524,6 +574,10 @@ plugins:
                     - quantity
           annotations:
             title: Create a bill-of-materials row (item component)
+          acl:
+            allow:
+              - manager
+              - admin
         - name: get-item-component
           description: Retrieve a single bill-of-materials row (item component) by its id.
           method: GET
@@ -538,6 +592,10 @@ plugins:
           annotations:
             title: Get a bill-of-materials row (item component)
             read_only_hint: true
+          acl:
+            allow:
+              - manager
+              - admin
         - name: update-item-component
           description: Replace all fields of an existing bill-of-materials row (item component) (PUT).
           method: PUT
@@ -575,6 +633,10 @@ plugins:
           annotations:
             title: Replace a bill-of-materials row (item component)
             idempotent_hint: true
+          acl:
+            allow:
+              - manager
+              - admin
         - name: patch-item-component
           description: Update only the given fields of an existing bill-of-materials row (item component)
             (PATCH).
@@ -608,6 +670,10 @@ plugins:
                       maxLength: 200
           annotations:
             title: Update a bill-of-materials row (item component)
+          acl:
+            allow:
+              - manager
+              - admin
         - name: delete-item-component
           description: Permanently delete a bill-of-materials row (item component) by its id.
           method: DELETE
@@ -623,6 +689,9 @@ plugins:
             title: Delete a bill-of-materials row (item component)
             destructive_hint: true
             idempotent_hint: true
+          acl:
+            allow:
+              - admin
       logging:
         log_statistics: true
         log_payloads: false
@@ -644,6 +713,9 @@ plugins:
       upstream_headers_names:
         - X-Authenticated-User
         - X-Authenticated-Email
+      consumer_groups_claim:
+        - mfg_roles
+      consumer_groups_optional: false
   - name: datakit
     instance_name: gw-mcp-basic-auth-item-components
     route: django-route-gw-mcp-item-components
@@ -668,6 +740,7 @@ plugins:
       - mfg-gw-mcp
     config:
       mode: conversion-only
+      include_consumer_groups: true
       tools:
         - name: list-items
           description: List all inventory items. Filter by item_type or category.
@@ -691,6 +764,11 @@ plugins:
           annotations:
             title: List inventory items
             read_only_hint: true
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: create-item
           description: Create a new inventory item (product, component or raw material).
           method: POST
@@ -736,6 +814,10 @@ plugins:
                     - unit_price
           annotations:
             title: Create a inventory item (product, component or raw material)
+          acl:
+            allow:
+              - manager
+              - admin
         - name: get-item
           description: Retrieve a single inventory item (product, component or raw material) by its id.
           method: GET
@@ -750,6 +832,11 @@ plugins:
           annotations:
             title: Get a inventory item (product, component or raw material)
             read_only_hint: true
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: update-item
           description: Replace all fields of an existing inventory item (product, component or raw material)
             (PUT).
@@ -804,6 +891,10 @@ plugins:
           annotations:
             title: Replace a inventory item (product, component or raw material)
             idempotent_hint: true
+          acl:
+            allow:
+              - manager
+              - admin
         - name: patch-item
           description: Update only the given fields of an existing inventory item (product, component
             or raw material) (PATCH).
@@ -853,6 +944,10 @@ plugins:
                       pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
           annotations:
             title: Update a inventory item (product, component or raw material)
+          acl:
+            allow:
+              - manager
+              - admin
         - name: delete-item
           description: Permanently delete a inventory item (product, component or raw material) by its
             id.
@@ -869,6 +964,9 @@ plugins:
             title: Delete a inventory item (product, component or raw material)
             destructive_hint: true
             idempotent_hint: true
+          acl:
+            allow:
+              - admin
         - name: build-item
           description: 'Produce `quantity` units of this item by consuming its bill of materials (item-components)
             from stock. All-or-nothing: 409 if any component is short.'
@@ -895,6 +993,10 @@ plugins:
                     - quantity
           annotations:
             title: Build (manufacture) an item from its components
+          acl:
+            allow:
+              - manager
+              - admin
       logging:
         log_statistics: true
         log_payloads: false
@@ -916,6 +1018,9 @@ plugins:
       upstream_headers_names:
         - X-Authenticated-User
         - X-Authenticated-Email
+      consumer_groups_claim:
+        - mfg_roles
+      consumer_groups_optional: false
   - name: datakit
     instance_name: gw-mcp-basic-auth-items
     route: django-route-gw-mcp-items
@@ -940,6 +1045,7 @@ plugins:
       - mfg-gw-mcp
     config:
       mode: conversion-only
+      include_consumer_groups: true
       tools:
         - name: list-orders
           description: List all sales orders. Filter by customer or status. Create/replace with nested
@@ -968,6 +1074,11 @@ plugins:
           annotations:
             title: List sales orders
             read_only_hint: true
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: create-order
           description: Create a new sales order.
           method: POST
@@ -1031,6 +1142,11 @@ plugins:
                     - order_number
           annotations:
             title: Create a sales order
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: get-order
           description: Retrieve a single sales order by its id.
           method: GET
@@ -1045,6 +1161,11 @@ plugins:
           annotations:
             title: Get a sales order
             read_only_hint: true
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: update-order
           description: Replace all fields of an existing sales order (PUT).
           method: PUT
@@ -1116,6 +1237,11 @@ plugins:
           annotations:
             title: Replace a sales order
             idempotent_hint: true
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: patch-order
           description: Update only the given fields of an existing sales order (PATCH).
           method: PATCH
@@ -1182,6 +1308,11 @@ plugins:
                           - quantity
           annotations:
             title: Update a sales order
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: delete-order
           description: Permanently delete a sales order by its id.
           method: DELETE
@@ -1197,6 +1328,9 @@ plugins:
             title: Delete a sales order
             destructive_hint: true
             idempotent_hint: true
+          acl:
+            allow:
+              - admin
         - name: cancel-order
           description: Cancel a sales order that has not shipped yet.
           method: POST
@@ -1210,6 +1344,11 @@ plugins:
               description: A unique integer value identifying this order.
           annotations:
             title: Cancel a sales order that has not shipped yet
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: confirm-order
           description: Confirm a draft sales order.
           method: POST
@@ -1223,6 +1362,11 @@ plugins:
               description: A unique integer value identifying this order.
           annotations:
             title: Confirm a draft sales order
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
       logging:
         log_statistics: true
         log_payloads: false
@@ -1244,6 +1388,9 @@ plugins:
       upstream_headers_names:
         - X-Authenticated-User
         - X-Authenticated-Email
+      consumer_groups_claim:
+        - mfg_roles
+      consumer_groups_optional: false
   - name: datakit
     instance_name: gw-mcp-basic-auth-orders
     route: django-route-gw-mcp-orders
@@ -1268,6 +1415,7 @@ plugins:
       - mfg-gw-mcp
     config:
       mode: conversion-only
+      include_consumer_groups: true
       tools:
         - name: list-purchase-orders
           description: List all purchase orders. Filter by supplier or status. Create/replace with nested
@@ -1295,6 +1443,10 @@ plugins:
           annotations:
             title: List purchase orders
             read_only_hint: true
+          acl:
+            allow:
+              - manager
+              - admin
         - name: create-purchase-order
           description: Create a new purchase order.
           method: POST
@@ -1355,6 +1507,10 @@ plugins:
                     - supplier
           annotations:
             title: Create a purchase order
+          acl:
+            allow:
+              - manager
+              - admin
         - name: get-purchase-order
           description: Retrieve a single purchase order by its id.
           method: GET
@@ -1369,6 +1525,10 @@ plugins:
           annotations:
             title: Get a purchase order
             read_only_hint: true
+          acl:
+            allow:
+              - manager
+              - admin
         - name: update-purchase-order
           description: Replace all fields of an existing purchase order (PUT).
           method: PUT
@@ -1437,6 +1597,10 @@ plugins:
           annotations:
             title: Replace a purchase order
             idempotent_hint: true
+          acl:
+            allow:
+              - manager
+              - admin
         - name: patch-purchase-order
           description: Update only the given fields of an existing purchase order (PATCH).
           method: PATCH
@@ -1500,6 +1664,10 @@ plugins:
                           - unit_cost
           annotations:
             title: Update a purchase order
+          acl:
+            allow:
+              - manager
+              - admin
         - name: delete-purchase-order
           description: Permanently delete a purchase order by its id.
           method: DELETE
@@ -1515,6 +1683,9 @@ plugins:
             title: Delete a purchase order
             destructive_hint: true
             idempotent_hint: true
+          acl:
+            allow:
+              - admin
         - name: receive-purchase-order
           description: Add received quantities to inventory stock and update the purchase order status
             (partially_received or received). Omit lines to receive everything outstanding. The PO must
@@ -1551,6 +1722,10 @@ plugins:
                       description: Lines to receive. Omit to receive everything outstanding.
           annotations:
             title: Receive goods for a purchase order
+          acl:
+            allow:
+              - manager
+              - admin
       logging:
         log_statistics: true
         log_payloads: false
@@ -1572,6 +1747,9 @@ plugins:
       upstream_headers_names:
         - X-Authenticated-User
         - X-Authenticated-Email
+      consumer_groups_claim:
+        - mfg_roles
+      consumer_groups_optional: false
   - name: datakit
     instance_name: gw-mcp-basic-auth-purchase-orders
     route: django-route-gw-mcp-purchase-orders
@@ -1596,6 +1774,7 @@ plugins:
       - mfg-gw-mcp
     config:
       mode: conversion-only
+      include_consumer_groups: true
       tools:
         - name: list-shipments
           description: 'List all shipments. Filter by order or status. Status is read-only here: change
@@ -1624,6 +1803,11 @@ plugins:
           annotations:
             title: List shipments
             read_only_hint: true
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: create-shipment
           description: Create a new shipment.
           method: POST
@@ -1658,6 +1842,10 @@ plugins:
                     - shipment_number
           annotations:
             title: Create a shipment
+          acl:
+            allow:
+              - manager
+              - admin
         - name: get-shipment
           description: Retrieve a single shipment by its id.
           method: GET
@@ -1672,6 +1860,11 @@ plugins:
           annotations:
             title: Get a shipment
             read_only_hint: true
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: update-shipment
           description: Replace all fields of an existing shipment (PUT).
           method: PUT
@@ -1714,6 +1907,10 @@ plugins:
           annotations:
             title: Replace a shipment
             idempotent_hint: true
+          acl:
+            allow:
+              - manager
+              - admin
         - name: patch-shipment
           description: Update only the given fields of an existing shipment (PATCH).
           method: PATCH
@@ -1752,6 +1949,10 @@ plugins:
                       format: date
           annotations:
             title: Update a shipment
+          acl:
+            allow:
+              - manager
+              - admin
         - name: delete-shipment
           description: Permanently delete a shipment by its id.
           method: DELETE
@@ -1767,6 +1968,9 @@ plugins:
             title: Delete a shipment
             destructive_hint: true
             idempotent_hint: true
+          acl:
+            allow:
+              - admin
       logging:
         log_statistics: true
         log_payloads: false
@@ -1788,6 +1992,9 @@ plugins:
       upstream_headers_names:
         - X-Authenticated-User
         - X-Authenticated-Email
+      consumer_groups_claim:
+        - mfg_roles
+      consumer_groups_optional: false
   - name: datakit
     instance_name: gw-mcp-basic-auth-shipments
     route: django-route-gw-mcp-shipments
@@ -1812,6 +2019,7 @@ plugins:
       - mfg-gw-mcp
     config:
       mode: conversion-only
+      include_consumer_groups: true
       tools:
         - name: get-shipping-schedule
           description: Shipments ordered by scheduled ship date. Filter with ship_from / ship_to (dates),
@@ -1854,6 +2062,11 @@ plugins:
           annotations:
             title: Get the shipping schedule
             read_only_hint: true
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
       logging:
         log_statistics: true
         log_payloads: false
@@ -1875,6 +2088,9 @@ plugins:
       upstream_headers_names:
         - X-Authenticated-User
         - X-Authenticated-Email
+      consumer_groups_claim:
+        - mfg_roles
+      consumer_groups_optional: false
   - name: datakit
     instance_name: gw-mcp-basic-auth-shipping-schedule
     route: django-route-gw-mcp-shipping-schedule
@@ -1899,6 +2115,7 @@ plugins:
       - mfg-gw-mcp
     config:
       mode: conversion-only
+      include_consumer_groups: true
       tools:
         - name: list-shipping-statuses
           description: List shipment status history, newest first. Filter by shipment or status.
@@ -1926,6 +2143,11 @@ plugins:
           annotations:
             title: List shipping status events
             read_only_hint: true
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
         - name: create-shipping-status
           description: Append a status event and move the shipment to that status. The first in_transit
             deducts the order's line quantities from stock (409 if short) and marks the order shipped;
@@ -1965,6 +2187,10 @@ plugins:
                     - status
           annotations:
             title: Record a new shipping status for a shipment
+          acl:
+            allow:
+              - manager
+              - admin
         - name: get-shipping-status
           description: Retrieve one status event by its id.
           method: GET
@@ -1979,6 +2205,11 @@ plugins:
           annotations:
             title: Get a shipping status event
             read_only_hint: true
+          acl:
+            allow:
+              - sales
+              - manager
+              - admin
       logging:
         log_statistics: true
         log_payloads: false
@@ -2000,6 +2231,9 @@ plugins:
       upstream_headers_names:
         - X-Authenticated-User
         - X-Authenticated-Email
+      consumer_groups_claim:
+        - mfg_roles
+      consumer_groups_optional: false
   - name: datakit
     instance_name: gw-mcp-basic-auth-shipping-statuses
     route: django-route-gw-mcp-shipping-statuses
@@ -2024,6 +2258,7 @@ plugins:
       - mfg-gw-mcp
     config:
       mode: conversion-only
+      include_consumer_groups: true
       tools:
         - name: list-suppliers
           description: List all suppliers. Filter by is_active.
@@ -2038,6 +2273,10 @@ plugins:
           annotations:
             title: List suppliers
             read_only_hint: true
+          acl:
+            allow:
+              - manager
+              - admin
         - name: create-supplier
           description: Create a new supplier.
           method: POST
@@ -2081,6 +2320,10 @@ plugins:
                     - name
           annotations:
             title: Create a supplier
+          acl:
+            allow:
+              - manager
+              - admin
         - name: get-supplier
           description: Retrieve a single supplier by its id.
           method: GET
@@ -2095,6 +2338,10 @@ plugins:
           annotations:
             title: Get a supplier
             read_only_hint: true
+          acl:
+            allow:
+              - manager
+              - admin
         - name: update-supplier
           description: Replace all fields of an existing supplier (PUT).
           method: PUT
@@ -2146,6 +2393,10 @@ plugins:
           annotations:
             title: Replace a supplier
             idempotent_hint: true
+          acl:
+            allow:
+              - manager
+              - admin
         - name: patch-supplier
           description: Update only the given fields of an existing supplier (PATCH).
           method: PATCH
@@ -2193,6 +2444,10 @@ plugins:
                       type: boolean
           annotations:
             title: Update a supplier
+          acl:
+            allow:
+              - manager
+              - admin
         - name: delete-supplier
           description: Permanently delete a supplier by its id.
           method: DELETE
@@ -2208,6 +2463,9 @@ plugins:
             title: Delete a supplier
             destructive_hint: true
             idempotent_hint: true
+          acl:
+            allow:
+              - admin
       logging:
         log_statistics: true
         log_payloads: false
@@ -2229,6 +2487,9 @@ plugins:
       upstream_headers_names:
         - X-Authenticated-User
         - X-Authenticated-Email
+      consumer_groups_claim:
+        - mfg_roles
+      consumer_groups_optional: false
   - name: datakit
     instance_name: gw-mcp-basic-auth-suppliers
     route: django-route-gw-mcp-suppliers

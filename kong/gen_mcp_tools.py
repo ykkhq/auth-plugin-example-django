@@ -52,6 +52,13 @@ GW_MCP_PATH = "/gw-mcp/mfg"
 GW_TOOLS_ROOT = "/gw-mcp/tools"
 GW_MCP_RESOURCE = "https://localhost:8443" + GW_MCP_PATH
 GW_MCP_TAG = "mfg-gw-mcp"
+# Tools by role for Auth0 users (MCP_README "Tools by role"): an Auth0 Post-Login
+# Action puts the user's roles in this access-token claim, Kong maps them to consumer
+# groups of the same names, and per-tool ACLs allow the groups. apikey servers: no ACL.
+ROLES_CLAIM = "mfg_roles"
+ROLES = ("sales", "manager", "admin")
+SALES_WRITE = {"customers", "orders"}  # sales: every tool but delete
+SALES_READ = {"items", "shipments", "shipping-statuses", "shipping-schedule"}  # GET only
 SKIP = ("/api/auth/", "/api/schema")
 SINGULAR = {
     "items": "item",
@@ -95,6 +102,10 @@ HEADER = """\
 #   MCP client --Auth0 JWT--> AI GW :11443/mcp-oidc/mfg/<resource>  (aud checked)
 #              --same JWT-->  Kong GW :8443/oidc/mfg/<resource>/...  (openid-connect bearer)
 #              --Basic-->     Django :3333/api/<resource>/...
+#
+# Tools by role: the strategy maps the token's mfg_roles claim to the AI consumer
+# groups sales/manager/admin (kong/ai-gateway-oidc.yaml); each OIDC tool's
+# access.acls allows only its roles, so tools/list is filtered and other calls get 403.
 """
 
 GW_HEADER = """\
@@ -116,6 +127,10 @@ GW_HEADER = """\
 # routes + one listener. Tool calls re-enter Kong through the tool routes with the
 # client's headers (passthrough_credentials keeps the JWT), so openid-connect there
 # validates the same token and rejects direct calls without one.
+#
+# Tools by role: ai-mcp-oauth2 and openid-connect map the token's mfg_roles claim to
+# the consumer groups sales/manager/admin below; each tool's acl allows only its
+# roles, so the listener's tools/list is filtered and other calls get 403.
 """
 
 
@@ -134,6 +149,8 @@ def server(resource, tools, oidc=False):
         access = {
             "acl_attribute_type": "consumer",
             "auth_strategies": ["mcp-auth0-oidc"],
+            # consumer groups from the token's roles; every tool has its own acls below
+            "default_tool_acls": {"allow": ["admin"]},
             "metadata": {
                 "resource": OIDC_RESOURCE,
                 "authorization_servers": ["__AUTH0_ISSUER_URL__"],
@@ -159,8 +176,23 @@ def server(resource, tools, oidc=False):
         },
         "access": access,
         # the OIDC servers forward the client's Authorization header instead of a key
-        "tools": [place(t, root, None if oidc else {"apikey": [UPSTREAM_APIKEY]}) for t in tools],
+        "tools": [
+            {**place(t, root), "access": {"acls": {"allow": tool_roles(resource, t)}}} if oidc
+            else place(t, root, {"apikey": [UPSTREAM_APIKEY]})
+            for t in tools
+        ],
     }
+
+
+def tool_roles(resource, tool):
+    """Consumer groups (Auth0 roles) allowed to see and call a tool."""
+    method = tool["method"]
+    roles = ["admin"]
+    if method != "DELETE":
+        roles.insert(0, "manager")
+        if resource in SALES_WRITE or (resource in SALES_READ and method == "GET"):
+            roles.insert(0, "sales")
+    return roles
 
 
 def place(tool, root, headers=None):
@@ -300,6 +332,8 @@ def gw_config(by_resource):
             "config": {
                 "mode": "listener",
                 "server": {"tag": GW_MCP_TAG, "timeout": 60000, "forward_client_headers": True},
+                # hand the caller's consumer groups to the tools' ACLs (tools/list filter)
+                "include_consumer_groups": True,
                 "logging": {"log_statistics": True, "log_payloads": False},
                 "max_request_body_size": 32768,
             },
@@ -318,6 +352,10 @@ def gw_config(by_resource):
                 "scopes_supported": ["openid", "profile", "email"],
                 # keep the JWT on the request: tool calls carry it to the tool routes
                 "passthrough_credentials": True,
+                # Auth0 roles -> consumer groups (no consumers); no known role = rejected
+                "consumer_optional": True,
+                "consumer_groups_claim": [ROLES_CLAIM],
+                "consumer_groups_optional": False,
             },
         },
         {
@@ -350,7 +388,10 @@ def gw_config(by_resource):
                 "tags": [GW_MCP_TAG],  # picked up by the listener's server.tag
                 "config": {
                     "mode": "conversion-only",
-                    "tools": [place(t, GW_TOOLS_ROOT) for t in tools],
+                    # per-tool ACL by consumer group (Auth0 role)
+                    "include_consumer_groups": True,
+                    "tools": [{**place(t, GW_TOOLS_ROOT), "acl": {"allow": tool_roles(resource, t)}}
+                              for t in tools],
                     "logging": {"log_statistics": True, "log_payloads": False},
                     "max_request_body_size": 32768,
                 },
@@ -369,6 +410,9 @@ def gw_config(by_resource):
                     "cache_tokens_salt": env("DECK_OIDC_CACHE_TOKENS_SALT"),
                     "upstream_headers_claims": ["sub", "email"],
                     "upstream_headers_names": ["X-Authenticated-User", "X-Authenticated-Email"],
+                    # tool calls are checked against the tool's acl here
+                    "consumer_groups_claim": [ROLES_CLAIM],
+                    "consumer_groups_optional": False,
                 },
             },
             {
@@ -389,6 +433,7 @@ def gw_config(by_resource):
     state = {
         "_format_version": "3.0",
         "_konnect": {"control_plane_name": "django-apigw"},
+        "consumer_groups": [{"name": r} for r in ROLES],
         "services": services,
         "plugins": plugins,
     }
@@ -482,6 +527,14 @@ claude mcp add --transport http mfg-gw-oidc {GW_MCP_RESOURCE} \\
 
 Then run `/mcp` in Claude Code and choose **Authenticate**.
 
+Your Auth0 role decides which tools you see and can call:
+
+| Role | Tools |
+|---|---|
+| `sales` | customers and sales orders, read-only items, shipments and shipping schedule |
+| `manager` | every tool except `delete-*` |
+| `admin` | all {tool_count} tools |
+
 {chr(10).join(sections)}
 ::
 """
@@ -516,8 +569,12 @@ def render():
         MCP_PAGE_OUT: mcp_page(servers, len(names)),
         GW_OUT: gw_config(by_resource),
     }
+    per_role = ", ".join(
+        f"{r} {sum(r in tool_roles(res, t) for res, ts in by_resource.items() for t in ts)}"
+        for r in ROLES)
     return outputs, (f"{len(servers)}+{len(oidc_servers)} AI GW servers, 1 Kong GW server, "
-                     f"{len(names)} tools, {len(names)} spec operations")
+                     f"{len(names)} tools ({per_role} for Auth0 users), "
+                     f"{len(names)} spec operations")
 
 
 def main():
